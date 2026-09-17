@@ -1,0 +1,369 @@
+use anyhow::{Context, Result, ensure};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    Paper,
+    Live,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    pub mode: Mode,
+    pub state_dir: String,
+    pub poll_seconds: u64,
+    pub hyperliquid: HyperliquidConfig,
+    pub liquidity: LiquidityConfig,
+    pub strategy: StrategyConfig,
+    #[serde(default)]
+    pub websocket: WebSocketConfig,
+    #[serde(default)]
+    pub monitoring: MonitoringConfig,
+    #[serde(default)]
+    pub logging: LoggingConfig,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HyperliquidConfig {
+    pub http_url: String,
+    pub ws_url: String,
+    pub mainnet: bool,
+    pub coins: Vec<String>,
+    pub hedge_coin: String,
+    pub private_key_env: String,
+    pub account: Option<String>,
+    pub vault: Option<String>,
+    pub leverage: u32,
+    pub cross_margin: bool,
+    pub maker_wait_seconds: u64,
+    pub emergency_slippage_bps: u32,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LiquidityConfig {
+    pub kind: String,
+    pub chain_id: u64,
+    pub rpc_url: String,
+    /// Historical reads only; transaction submission always uses rpc_url.
+    pub archive_rpc_url: Option<String>,
+    #[serde(default = "default_evm_ws")]
+    pub ws_url: String,
+    /// Public LP wallet address for monitoring without loading a private key.
+    pub owner: Option<String>,
+    #[serde(default = "default_nonce_refresh")]
+    pub nonce_refresh_seconds: u64,
+    #[serde(default = "default_tx_stale")]
+    pub pending_warn_seconds: u64,
+    pub pool: String,
+    pub factory: String,
+    pub position_manager: String,
+    pub swap_router: String,
+    pub base_token: String,
+    pub quote_token: String,
+    pub base_decimals: u8,
+    pub quote_decimals: u8,
+    pub fee: u32,
+    pub private_key_env: String,
+    pub confirmations: u64,
+    pub slippage_bps: u32,
+    pub deadline_seconds: u64,
+    pub max_gas_native: f64,
+}
+fn default_evm_ws() -> String {
+    "wss://robinhood-rpc.publicnode.com".into()
+}
+fn default_nonce_refresh() -> u64 {
+    30
+}
+fn default_tx_stale() -> u64 {
+    120
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WebSocketConfig {
+    pub heartbeat_seconds: u64,
+    pub heartbeat_timeout_seconds: u64,
+    pub idle_timeout_seconds: u64,
+    pub connect_timeout_seconds: u64,
+    pub write_timeout_seconds: u64,
+    pub reconnect_initial_ms: u64,
+    pub reconnect_max_seconds: u64,
+}
+impl Default for WebSocketConfig {
+    fn default() -> Self {
+        Self {
+            heartbeat_seconds: 20,
+            heartbeat_timeout_seconds: 60,
+            idle_timeout_seconds: 300,
+            connect_timeout_seconds: 15,
+            write_timeout_seconds: 10,
+            reconnect_initial_ms: 1000,
+            reconnect_max_seconds: 30,
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MonitoringConfig {
+    pub hyperliquid_interval_seconds: u64,
+    pub robinhood_interval_seconds: u64,
+    pub volume_window_seconds: u64,
+    pub backfill_blocks: u64,
+    pub refresh_timeout_seconds: u64,
+}
+impl Default for MonitoringConfig {
+    fn default() -> Self {
+        Self {
+            hyperliquid_interval_seconds: 30,
+            robinhood_interval_seconds: 15,
+            volume_window_seconds: 300,
+            backfill_blocks: 6000,
+            refresh_timeout_seconds: 45,
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LoggingConfig {
+    pub directory: String,
+    pub retained_files: usize,
+    pub level: String,
+}
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            directory: "data/logs".into(),
+            retained_files: 14,
+            level: "info".into(),
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StrategyConfig {
+    pub total_capital: f64,
+    pub lp_budget: f64,
+    pub hedge_collateral: f64,
+    pub reserve: f64,
+    pub inside_hedge_ratio: f64,
+    pub hedge_deadband_usd: f64,
+    pub max_drawdown: f64,
+    pub max_basis_bps: f64,
+    pub max_data_age_seconds: u64,
+    pub fast_drop_1h: f64,
+    pub vol_short_hours: usize,
+    pub vol_long_hours: usize,
+    pub vol_pause_ratio: f64,
+    pub vol_resume_ratio: f64,
+    pub ema_fast_hours: usize,
+    pub ema_slow_hours: usize,
+    pub resume_healthy_hours: u32,
+    pub cooldown_hours: u64,
+    pub recovery_fraction: f64,
+    pub recovery_step_hours: u64,
+    pub breakout_buffer: f64,
+    pub breakout_confirm_bars: u32,
+    pub decision_bar_seconds: u64,
+    pub hedge_release_buffer: f64,
+    pub layers: Vec<LayerConfig>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayerConfig {
+    pub name: String,
+    pub weight: f64,
+    pub half_width: f64,
+}
+impl Config {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        let c: Self = toml::from_str(&std::fs::read_to_string(path).context("read config")?)?;
+        c.validate()?;
+        Ok(c)
+    }
+    pub fn validate(&self) -> Result<()> {
+        validate_url(&self.hyperliquid.http_url, &["https", "http"])?;
+        validate_url(&self.hyperliquid.ws_url, &["wss", "ws"])?;
+        validate_url(&self.liquidity.rpc_url, &["https", "http", "wss", "ws"])?;
+        validate_url(&self.liquidity.ws_url, &["wss", "ws"])?;
+        if let Some(url) = &self.liquidity.archive_rpc_url {
+            validate_url(url, &["http", "https", "ws", "wss"])?;
+        }
+        let w = &self.websocket;
+        ensure!(
+            w.heartbeat_seconds > 0
+                && w.heartbeat_timeout_seconds > w.heartbeat_seconds
+                && w.idle_timeout_seconds > w.heartbeat_seconds
+                && w.connect_timeout_seconds > 0
+                && w.write_timeout_seconds > 0
+                && w.reconnect_initial_ms > 0
+                && w.reconnect_initial_ms <= w.reconnect_max_seconds.saturating_mul(1000),
+            "invalid websocket lifecycle settings"
+        );
+        ensure!(
+            self.monitoring.hyperliquid_interval_seconds > 0
+                && self.monitoring.robinhood_interval_seconds > 0
+                && self.monitoring.volume_window_seconds > 0
+                && self.monitoring.backfill_blocks > 0
+                && self.monitoring.backfill_blocks <= 100_000
+                && self.monitoring.refresh_timeout_seconds > 0
+                && self.liquidity.nonce_refresh_seconds > 0
+                && self.liquidity.pending_warn_seconds > 0
+                && self.logging.retained_files > 0,
+            "invalid monitoring/lifecycle settings"
+        );
+        for a in [
+            &self.hyperliquid.account,
+            &self.hyperliquid.vault,
+            &self.liquidity.owner,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let _: alloy::primitives::Address = a.parse().context("invalid account address")?;
+        }
+        let s = &self.strategy;
+        for v in [
+            s.total_capital,
+            s.lp_budget,
+            s.hedge_collateral,
+            s.hedge_deadband_usd,
+            s.max_basis_bps,
+            self.liquidity.max_gas_native,
+        ] {
+            ensure!(
+                v.is_finite() && v > 0.0,
+                "positive finite budget/limit required"
+            );
+        }
+        ensure!(s.reserve.is_finite() && s.reserve >= 0.0, "invalid reserve");
+        ensure!(
+            s.lp_budget + s.hedge_collateral + s.reserve <= s.total_capital + 1e-6,
+            "budgets exceed total capital"
+        );
+        for v in [s.max_drawdown, s.fast_drop_1h, s.recovery_fraction] {
+            ensure!(
+                v.is_finite() && v > 0.0 && v <= 1.0,
+                "invalid fractional limit"
+            );
+        }
+        ensure!(
+            (0.0..=1.0).contains(&s.inside_hedge_ratio),
+            "invalid hedge ratio"
+        );
+        ensure!(
+            s.vol_short_hours >= 2
+                && s.vol_long_hours > s.vol_short_hours
+                && s.vol_long_hours < 4000,
+            "invalid volatility windows"
+        );
+        ensure!(
+            s.ema_fast_hours > 1 && s.ema_slow_hours > s.ema_fast_hours && s.ema_slow_hours < 4000,
+            "invalid EMA windows"
+        );
+        ensure!(
+            s.vol_resume_ratio > 0.0
+                && s.vol_pause_ratio > s.vol_resume_ratio
+                && s.vol_pause_ratio.is_finite(),
+            "invalid volatility hysteresis"
+        );
+        ensure!(
+            s.breakout_buffer.is_finite() && (0.0..0.2).contains(&s.breakout_buffer),
+            "invalid breakout buffer"
+        );
+        ensure!(
+            s.hedge_release_buffer.is_finite() && (0.0..0.2).contains(&s.hedge_release_buffer),
+            "invalid hedge release"
+        );
+        ensure!(
+            s.resume_healthy_hours > 0
+                && s.recovery_step_hours > 0
+                && s.breakout_confirm_bars > 0
+                && s.decision_bar_seconds > 0,
+            "zero confirmation period"
+        );
+        ensure!(
+            self.poll_seconds > 0 && s.max_data_age_seconds > self.poll_seconds,
+            "invalid poll/stale interval"
+        );
+        ensure!(
+            !s.layers.is_empty()
+                && s.layers.iter().all(|x| x.weight.is_finite()
+                    && x.weight > 0.0
+                    && x.half_width.is_finite()
+                    && x.half_width > 0.001
+                    && x.half_width < 1.0),
+            "invalid layers"
+        );
+        ensure!(
+            (s.layers.iter().map(|x| x.weight).sum::<f64>() - 1.0).abs() < 1e-8,
+            "layer weights must sum to one"
+        );
+        let mut names = std::collections::HashSet::new();
+        ensure!(
+            s.layers.iter().all(|l| names.insert(&l.name)),
+            "duplicate layer name"
+        );
+        ensure!(
+            self.hyperliquid.leverage > 0 && self.hyperliquid.leverage <= 3,
+            "strategy leverage capped at 3x"
+        );
+        ensure!(
+            self.hyperliquid.maker_wait_seconds > 0,
+            "maker wait must be positive"
+        );
+        ensure!(
+            self.hyperliquid.emergency_slippage_bps > 0
+                && self.hyperliquid.emergency_slippage_bps <= 100
+                && self.liquidity.slippage_bps > 0
+                && self.liquidity.slippage_bps <= 100,
+            "slippage must be in 1..100 bps"
+        );
+        ensure!(
+            self.liquidity.kind == "uniswap_v3",
+            "unsupported liquidity adapter"
+        );
+        ensure!(
+            self.liquidity.confirmations > 0 && self.liquidity.deadline_seconds >= 30,
+            "invalid chain finality/deadline"
+        );
+        for a in [
+            &self.liquidity.pool,
+            &self.liquidity.factory,
+            &self.liquidity.position_manager,
+            &self.liquidity.swap_router,
+            &self.liquidity.base_token,
+            &self.liquidity.quote_token,
+        ] {
+            let _: alloy::primitives::Address = a.parse().context("invalid contract address")?;
+        }
+        ensure!(
+            self.liquidity.base_token.to_lowercase() != self.liquidity.quote_token.to_lowercase(),
+            "same pool tokens"
+        );
+        ensure!(
+            self.liquidity.base_decimals <= 24
+                && self.liquidity.quote_decimals <= 24
+                && self.liquidity.fee < 1_000_000,
+            "invalid token configuration"
+        );
+        if self.mode == Mode::Live {
+            ensure!(
+                self.hyperliquid.account.is_some(),
+                "live requires Hyperliquid account owner address"
+            );
+        }
+        Ok(())
+    }
+}
+
+pub fn validate_url(url: &str, schemes: &[&str]) -> Result<()> {
+    let parsed = reqwest::Url::parse(url).context("invalid endpoint URL")?;
+    ensure!(
+        schemes.contains(&parsed.scheme()) && parsed.host_str().is_some(),
+        "unsupported endpoint protocol"
+    );
+    Ok(())
+}

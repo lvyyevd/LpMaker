@@ -1,0 +1,104 @@
+# All thresholds are research defaults, not optimized or profit guarantees.
+mode = "paper"
+state_dir = "data/paper"
+poll_seconds = 15
+
+[hyperliquid]
+http_url = "https://api.hyperliquid.xyz"
+ws_url = "wss://api.hyperliquid.xyz/ws"
+mainnet = true
+coins = ["ETH", "BTC", "SOL"]
+hedge_coin = "ETH"
+private_key_env = "LPMAKER_HL_PRIVATE_KEY"
+# Account owner (NOT API/agent wallet). Required for authenticated live trading.
+# account = "0x..."
+# vault = "0x..."
+leverage = 3
+cross_margin = false
+maker_wait_seconds = 15
+emergency_slippage_bps = 30
+
+[liquidity]
+kind = "uniswap_v3"
+chain_id = 4663
+rpc_url = "https://robinhood-rpc.publicnode.com"
+# History only: PublicNode free eth_getLogs may require a personal token.
+archive_rpc_url = "https://rpc.mainnet.chain.robinhood.com"
+ws_url = "wss://robinhood-rpc.publicnode.com"
+# Optional public LP address for read-only monitoring; no private key needed.
+# owner = "0x..."
+nonce_refresh_seconds = 30
+pending_warn_seconds = 120
+pool = "0x52e65B17fB6E5BA00Ed806f37Afcd2DaA50271Ca"
+factory = "0x1f7d7550b1b028f7571e69a784071f0205fd2efa"
+position_manager = "0x73991a25c818bf1f1128deaab1492d45638de0d3"
+swap_router = "0xcaf681a66d020601342297493863e78c959e5cb2"
+base_token = "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73"
+quote_token = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+base_decimals = 18
+quote_decimals = 6
+fee = 100
+private_key_env = "LPMAKER_EVM_PRIVATE_KEY"
+confirmations = 12
+slippage_bps = 30
+deadline_seconds = 120
+max_gas_native = 0.003
+
+[strategy]
+total_capital = 10000.0
+lp_budget = 6000.0
+hedge_collateral = 2500.0
+reserve = 1500.0
+inside_hedge_ratio = 0.0
+hedge_deadband_usd = 50.0
+max_drawdown = 0.05
+max_basis_bps = 100.0
+max_data_age_seconds = 60
+fast_drop_1h = 0.015
+vol_short_hours = 6
+vol_long_hours = 168
+vol_pause_ratio = 1.8
+vol_resume_ratio = 1.2
+ema_fast_hours = 20
+ema_slow_hours = 60
+resume_healthy_hours = 6
+cooldown_hours = 6
+recovery_fraction = 0.25
+recovery_step_hours = 4
+breakout_buffer = 0.01
+breakout_confirm_bars = 8
+decision_bar_seconds = 900
+hedge_release_buffer = 0.004
+
+[[strategy.layers]]
+name = "core"
+weight = 0.6666666666666666
+half_width = 0.08
+
+[[strategy.layers]]
+name = "satellite"
+weight = 0.3333333333333333
+half_width = 0.02
+
+
+[websocket]
+heartbeat_seconds = 20
+heartbeat_timeout_seconds = 60
+# Reconnect after 5 minutes without business data; pong does not reset this timer.
+idle_timeout_seconds = 300
+connect_timeout_seconds = 15
+write_timeout_seconds = 10
+reconnect_initial_ms = 1000
+reconnect_max_seconds = 30
+
+[monitoring]
+hyperliquid_interval_seconds = 30
+robinhood_interval_seconds = 15
+volume_window_seconds = 300
+backfill_blocks = 6000
+refresh_timeout_seconds = 45
+
+[logging]
+level = "info"
+directory = "data/logs"
+retained_files = 14

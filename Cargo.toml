@@ -1,0 +1,34 @@
+[package]
+name = "lp-maker"
+version = "0.1.0"
+edition = "2024"
+description = "Extensible concentrated-liquidity and perpetual-hedging engine"
+license = "MIT"
+
+[dependencies]
+alloy = { version = "=2.1.1", default-features = false, features = ["std", "sol-types", "signer-local", "consensus", "eips", "k256", "serde"] }
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "=4.6.6", features = ["derive"] }
+fs2 = "0.4"
+futures-util = "0.3"
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rmp-serde = "1"
+rust_decimal = "=1.37.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
