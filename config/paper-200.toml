@@ -45,6 +45,7 @@ confirmations = 12
 slippage_bps = 30
 deadline_seconds = 120
 max_gas_native = 0.003
+max_quote_age_seconds = 60
 
 [strategy]
 total_capital = 200.0
@@ -104,3 +105,17 @@ refresh_timeout_seconds = 45
 level = "info"
 directory = "data/logs"
 retained_files = 14
+
+
+[runtime]
+# Failed reads restart reconciliation; uncertain writes are never replayed.
+read_retry_seconds = 5
+observation_timeout_seconds = 45
+
+[storage]
+event_segment_bytes = 16777216
+event_retained_segments = 32
+terminal_orders_keep = 1000
+# Immutable terminal-order history: stop at this cap; never silently erase IDs.
+order_archive_max_bytes = 268435456
+min_free_bytes = 268435456

@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod journal;
 pub mod orders;
 pub mod signing;
@@ -8,7 +9,7 @@ use crate::{
     store::Store,
 };
 use alloy::{primitives::Address, signers::local::PrivateKeySigner};
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -23,6 +24,14 @@ pub struct Asset {
     #[serde(default)]
     pub is_delisted: bool,
 }
+#[derive(Debug)]
+pub struct ExchangeRejected(pub String);
+impl std::fmt::Display for ExchangeRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for ExchangeRejected {}
 #[derive(Clone)]
 pub struct Client {
     pub cfg: HyperliquidConfig,
@@ -41,7 +50,7 @@ impl Client {
             store,
         })
     }
-    pub fn enable_signing(&mut self) -> Result<()> {
+    pub async fn enable_signing(&mut self) -> Result<()> {
         ensure!(
             self.cfg.mainnet == self.cfg.http_url.contains("api.hyperliquid.xyz"),
             "Hyperliquid network/signature domain mismatch"
@@ -53,8 +62,29 @@ impl Client {
         );
         let key = std::env::var(&self.cfg.private_key_env)
             .context("missing Hyperliquid signing environment variable")?;
-        self.signer = Some(key.parse().context("invalid Hyperliquid signer")?);
-        let _: Address = self.user()?.parse()?;
+        let signer: PrivateKeySigner = key.parse().context("invalid Hyperliquid signer")?;
+        self.verify_identity(signer.address()).await?;
+        self.signer = Some(signer);
+        Ok(())
+    }
+    async fn verify_identity(&self, signer: Address) -> Result<()> {
+        let identity = auth::verify(self, signer).await?;
+        let previous = self.store.read::<Value>("hl_identity.json")?;
+        if let Some(old) = &previous {
+            ensure!(
+                ["mainnet", "master", "user"]
+                    .iter()
+                    .all(|k| old[*k] == identity[*k]),
+                "state directory belongs to another Hyperliquid identity"
+            );
+        }
+        if previous
+            .as_ref()
+            .is_none_or(|old| old["signer"] != identity["signer"])
+        {
+            self.store.event("hl_signer_verified", &identity)?;
+        }
+        self.store.write("hl_identity.json", &identity)?;
         Ok(())
     }
     pub fn user(&self) -> Result<&str> {
@@ -68,19 +98,35 @@ impl Client {
         let started = std::time::Instant::now();
         tracing::debug!(request_type=%request["type"], "Hyperliquid info request started");
         for attempt in 0..3 {
-            let r = self
+            let response = self
                 .http
                 .post(format!("{}/info", self.cfg.http_url))
                 .json(&request)
                 .send()
-                .await?;
-            if (r.status() == 429 || r.status().is_server_error()) && attempt < 2 {
-                tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
-                continue;
+                .await;
+            let failure = match response {
+                Ok(r) if r.status() == 429 || r.status().is_server_error() => {
+                    format!("Hyperliquid info HTTP {}", r.status())
+                }
+                Ok(r) => {
+                    let r = r.error_for_status()?;
+                    match r.json::<Value>().await {
+                        Ok(value) => {
+                            tracing::debug!(request_type=%request["type"], elapsed_ms=started.elapsed().as_millis(), "Hyperliquid info response received");
+                            return Ok(value);
+                        }
+                        Err(e) => format!("Hyperliquid info body unavailable: {}", e.without_url()),
+                    }
+                }
+                Err(e) => format!(
+                    "Hyperliquid info transport unavailable: {}",
+                    e.without_url()
+                ),
+            };
+            if attempt == 2 {
+                return Err(crate::runtime::ReadUnavailable(failure).into());
             }
-            let value = r.error_for_status()?.json().await?;
-            tracing::debug!(request_type=%request["type"], elapsed_ms=started.elapsed().as_millis(), "Hyperliquid info response received");
-            return Ok(value);
+            tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
         }
         unreachable!()
     }
@@ -146,12 +192,65 @@ impl Client {
         self.info(json!({"type":"fundingHistory","coin":coin,"startTime":start,"endTime":end}))
             .await
     }
+    pub async fn active_asset(&self, coin: &str) -> Result<Value> {
+        let v = self
+            .info(json!({"type":"activeAssetData","user":self.user()?,"coin":coin}))
+            .await?;
+        ensure!(
+            v["coin"] == coin
+                && v["user"]
+                    .as_str()
+                    .is_some_and(|u| u.eq_ignore_ascii_case(self.user().unwrap_or(""))),
+            "active asset response identity mismatch"
+        );
+        ensure!(
+            v["leverage"]["value"].as_u64().is_some()
+                && matches!(v["leverage"]["type"].as_str(), Some("cross" | "isolated")),
+            "invalid asset leverage response"
+        );
+        Ok(v)
+    }
     pub async fn exchange(&self, action: Value) -> Result<Value> {
+        self.exchange_inner(action, None).await
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub async fn managed_order(
+        &self,
+        coin: &str,
+        buy: bool,
+        price: &str,
+        size: &str,
+        tif: &str,
+        cloid: &str,
+        target: f64,
+        quote_ms: u64,
+        max_age_seconds: u64,
+    ) -> Result<Value> {
+        let (id, asset) = self.asset(coin).await?;
+        let wire = orders::wire(id, &asset, buy, price, size, tif, buy, Some(cloid))?;
+        let intent = json!({"coin":coin,"cloid":cloid,"target":target,"buy":buy,"price":price,"size":size,"tif":tif,
+            "quote_ms":quote_ms,"max_age_seconds":max_age_seconds});
+        self.exchange_inner(
+            json!({"type":"order","orders":[wire],"grouping":"na"}),
+            Some(intent),
+        )
+        .await
+    }
+    async fn exchange_inner(&self, action: Value, hedge: Option<Value>) -> Result<Value> {
+        journal::validate_new_ids(&self.store, &action)?;
         tracing::info!(action=%action, "Hyperliquid exchange operation started");
         let signer = self
             .signer
             .as_ref()
             .context("signing disabled; explicit live mode required")?;
+        self.verify_identity(signer.address()).await?;
+        if let Some(h) = &hedge {
+            crate::runtime::fresh(
+                h["quote_ms"].as_u64().context("quote time")?,
+                crate::now_ms(),
+                h["max_age_seconds"].as_u64().context("quote lifetime")?,
+            )?;
+        }
         let nonce = self.store.next_nonce()?;
         let expires = nonce + 60_000;
         let vault = self
@@ -169,9 +268,24 @@ impl Client {
             self.cfg.mainnet,
         )?;
         let request = json!({"action":action,"nonce":nonce,"signature":signature,"vaultAddress":self.cfg.vault,"expiresAfter":expires});
-        self.store
-            .begin(json!({"venue":"hyperliquid","request":request,"user":self.user()?}))?;
+        let mut pending = json!({"venue":"hyperliquid","request":request,"user":self.user()?,
+            "dispatch_state":"prepared","hedge_intent":hedge});
+        self.store.begin(pending.clone())?;
+        if let Some(h) = &hedge {
+            self.store.write("hedge_order.json", h)?;
+        }
         journal::prepare(&self.store, &action, self.user()?, nonce)?;
+        // Slow durable writes can also age the quote. A failed guard here leaves
+        // prepared (provably unsent), so recovery can retire the intent safely.
+        if let Some(h) = &hedge {
+            crate::runtime::fresh(
+                h["quote_ms"].as_u64().context("quote time")?,
+                crate::now_ms(),
+                h["max_age_seconds"].as_u64().context("quote lifetime")?,
+            )?;
+        }
+        pending["dispatch_state"] = json!("submitting");
+        self.store.write("pending.json", &pending)?;
         // Never retry exchange writes automatically. A timeout can mean the order exists.
         let response: Value = self
             .http
@@ -333,11 +447,14 @@ pub fn num(v: &Value) -> Result<f64> {
     Ok(n)
 }
 pub fn validate_response(v: &Value) -> Result<()> {
-    ensure!(v["status"] == "ok", "exchange rejected: {v}");
+    if v["status"] == "err" {
+        return Err(ExchangeRejected(format!("exchange rejected: {v}")).into());
+    }
+    ensure!(v["status"] == "ok", "unrecognized exchange response: {v}");
     if let Some(statuses) = v["response"]["data"]["statuses"].as_array() {
         for s in statuses {
             if let Some(e) = s.get("error") {
-                bail!("exchange action rejected: {e}")
+                return Err(ExchangeRejected(format!("exchange action rejected: {e}")).into());
             }
         }
     }
@@ -354,3 +471,6 @@ pub fn position_size(account: &Value, coin: &str) -> Result<f64> {
     }
     Ok(0.0)
 }
+
+#[cfg(test)]
+mod tests;

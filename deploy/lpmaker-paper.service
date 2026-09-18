@@ -1,0 +1,28 @@
+# Example only; install binary/config/data under /opt/lpmaker and create
+# the lpmaker service user before installing. Default remains PAPER.
+[Unit]
+Description=LpMaker paper strategy
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=lpmaker
+Group=lpmaker
+WorkingDirectory=/opt/lpmaker
+ExecStart=/opt/lpmaker/lp-maker --config /opt/lpmaker/config/paper-200.toml run
+Restart=on-failure
+RestartSec=15
+KillSignal=SIGTERM
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/lpmaker/data
+
+[Install]
+WantedBy=multi-user.target

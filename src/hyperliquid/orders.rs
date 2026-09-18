@@ -6,6 +6,16 @@ use std::str::FromStr;
 pub fn cloid() -> String {
     format!("0x{}", uuid::Uuid::new_v4().simple())
 }
+/// Opening dust is deferred, never rounded up into additional exposure.
+pub fn tradeable(price: &str, size: &str, reduce_only: bool) -> Result<bool> {
+    let p = Decimal::from_str(price)?;
+    let s = Decimal::from_str(size)?;
+    ensure!(
+        p > Decimal::ZERO && s >= Decimal::ZERO,
+        "invalid hedge amount"
+    );
+    Ok(s > Decimal::ZERO && (reduce_only || p * s >= Decimal::from(10)))
+}
 pub fn validate_price(s: &str, sz_decimals: u32) -> Result<Decimal> {
     let d = Decimal::from_str(s)?.normalize();
     ensure!(

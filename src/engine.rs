@@ -279,16 +279,26 @@ pub struct Live {
     pub hl: Client,
     pub cfg: Config,
 }
+#[derive(Debug)]
+struct HedgeBudgetUnavailable(&'static str);
+impl std::fmt::Display for HedgeBudgetUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for HedgeBudgetUnavailable {}
 impl Live {
     async fn entry_guard(&self) -> Result<()> {
-        let now = crate::now_ms();
+        crate::runtime::observe(
+            self.cfg.runtime.observation_timeout_seconds,
+            self.entry_guard_inner(),
+        )
+        .await
+    }
+    async fn entry_guard_inner(&self) -> Result<()> {
+        let started = crate::now_ms();
         let s = self.liquidity.snapshot().await?;
         let (p, t) = self.hl.market(&self.cfg.hyperliquid.hedge_coin).await?;
-        ensure!(
-            now.saturating_sub(s.time_ms) <= self.cfg.strategy.max_data_age_seconds * 1000
-                && now.saturating_sub(t) <= self.cfg.strategy.max_data_age_seconds * 1000,
-            "entry prices stale"
-        );
         ensure!(
             (s.price / p - 1.0).abs() * 10000.0 <= self.cfg.strategy.max_basis_bps,
             "entry basis limit"
@@ -300,10 +310,14 @@ impl Live {
             .candles(
                 &self.cfg.hyperliquid.hedge_coin,
                 "1h",
-                now.saturating_sub(count as u64 * 3_600_000),
-                now,
+                started.saturating_sub(count as u64 * 3_600_000),
+                started,
             )
             .await?;
+        let now = crate::now_ms();
+        crate::runtime::fresh(started, now, self.cfg.runtime.observation_timeout_seconds)?;
+        crate::runtime::fresh(s.time_ms, now, c.max_data_age_seconds)?;
+        crate::runtime::fresh(t, now, c.max_data_age_seconds)?;
         let m = crate::strategy::indicators::calculate(&bars, c, now)?;
         ensure!(
             !m.downtrend
@@ -435,9 +449,11 @@ impl Live {
         );
         self.store
             .write("hedge_order.json", &Option::<Value>::None)?;
+        journal::compact(&self.store)?;
         Ok(())
     }
     pub async fn hedge(&self, target: f64, emergency: bool) -> Result<()> {
+        ensure!(target.is_finite() && target >= 0.0, "invalid hedge target");
         let coin = &self.cfg.hyperliquid.hedge_coin;
         let account = self.hl.account().await?;
         let signed = position_size(&account, coin)?;
@@ -447,49 +463,59 @@ impl Live {
         let mid = (bid + ask) / 2.0;
         let target = if target * mid < 0.01 { 0.0 } else { target };
         let delta = target - current;
-        ensure!(
-            crate::now_ms().saturating_sub(time) <= self.cfg.strategy.max_data_age_seconds * 1000,
-            "stale hedge book"
-        );
+        crate::runtime::fresh(
+            time,
+            crate::now_ms(),
+            self.cfg.strategy.max_data_age_seconds,
+        )?;
         if delta.abs() * mid
-            < if target == 0.0 {
+            < if target == 0.0 || emergency {
                 0.01
             } else {
                 self.cfg.strategy.hedge_deadband_usd
             }
         {
-            return Ok(());
+            return self.hedge_residual(target, current, mid, "within_hedge_deadband");
         }
         if delta > 0.0 {
-            ensure!(
-                target * mid / self.cfg.hyperliquid.leverage as f64
-                    <= self.cfg.strategy.hedge_collateral * 0.9,
-                "hedge margin budget exceeded"
-            );
-            ensure!(
-                delta * mid / self.cfg.hyperliquid.leverage as f64
-                    <= num(&account["withdrawable"])?,
-                "insufficient free hedge collateral"
-            );
+            if target * mid / self.cfg.hyperliquid.leverage as f64
+                > self.cfg.strategy.hedge_collateral * 0.9
+            {
+                return Err(HedgeBudgetUnavailable("hedge margin budget exceeded").into());
+            }
+            if delta * mid / self.cfg.hyperliquid.leverage as f64 > num(&account["withdrawable"])? {
+                return Err(HedgeBudgetUnavailable("insufficient free hedge collateral").into());
+            }
         }
         let (_, asset) = self.hl.asset(coin).await?;
         let size = orders::quantity(delta.abs(), asset.sz_decimals)?;
-        if size == "0" {
-            return Ok(());
-        }
         let buy = delta < 0.0;
         let cloid = orders::cloid();
         let px = orders::price(if buy { bid } else { ask }, asset.sz_decimals, !buy)?;
-        self.store.write(
-            "hedge_order.json",
-            &Some(json!({"coin":coin,"cloid":cloid,"target":target,"buy":buy,"price":px,"size":size,"tif":"Alo","submitted_ms":crate::now_ms()})),
-        )?;
+        if !orders::tradeable(&px, &size, buy)? {
+            return self.hedge_residual(
+                target,
+                current,
+                mid,
+                "below_opening_minimum_or_lot_precision",
+            );
+        }
         let result = self
             .hl
-            .order(coin, buy, &px, &size, "Alo", buy, &cloid)
+            .managed_order(
+                coin,
+                buy,
+                &px,
+                &size,
+                "Alo",
+                &cloid,
+                target,
+                time,
+                self.cfg.strategy.max_data_age_seconds,
+            )
             .await;
         if let Err(e) = result {
-            if self.store.pending()?.is_some() {
+            if self.store.pending()?.is_some() || !e.is::<crate::hyperliquid::ExchangeRejected>() {
                 return Err(e);
             }
             self.store.event("maker_rejected", format!("{e:#}"))?;
@@ -502,15 +528,16 @@ impl Live {
             .await;
             self.cancel_if_open(coin, &cloid).await?;
         }
+        // The original order is now confirmed rejected, canceled or filled.
+        self.store
+            .write("hedge_order.json", &Option::<Value>::None)?;
         // Read exchange inventory after cancel acknowledgement; cancellation may race a fill.
         let current = -position_size(&self.hl.account().await?, coin)?;
+        let mut final_current = current;
         let remaining = target - current;
         if emergency && remaining.abs() * mid >= 0.01 {
             let (bid, ask, t) = self.hl.book(coin).await?;
-            ensure!(
-                crate::now_ms().saturating_sub(t) <= self.cfg.strategy.max_data_age_seconds * 1000,
-                "stale emergency quote"
-            );
+            crate::runtime::fresh(t, crate::now_ms(), self.cfg.strategy.max_data_age_seconds)?;
             let buy = remaining < 0.0;
             let slip = self.cfg.hyperliquid.emergency_slippage_bps as f64 / 10000.0;
             let px = orders::price(
@@ -523,16 +550,32 @@ impl Live {
                 buy,
             )?;
             let sz = orders::quantity(remaining.abs(), asset.sz_decimals)?;
+            if !orders::tradeable(&px, &sz, buy)? {
+                return self.hedge_residual(
+                    target,
+                    current,
+                    (bid + ask) / 2.0,
+                    "partial_fill_dust_deferred",
+                );
+            }
             if sz != "0" {
                 let id = orders::cloid();
-                self.store.write(
-                    "hedge_order.json",
-                    &Some(json!({"coin":coin,"cloid":id,"target":target,
-                    "buy":buy,"price":px,"size":sz,"tif":"Ioc","submitted_ms":crate::now_ms()})),
-                )?;
-                self.hl.order(coin, buy, &px, &sz, "Ioc", buy, &id).await?;
+                self.hl
+                    .managed_order(
+                        coin,
+                        buy,
+                        &px,
+                        &sz,
+                        "Ioc",
+                        &id,
+                        target,
+                        t,
+                        self.cfg.strategy.max_data_age_seconds,
+                    )
+                    .await?;
             }
             let actual = -position_size(&self.hl.account().await?, coin)?;
+            final_current = actual;
             ensure!(
                 (target - actual).abs() * mid < self.cfg.strategy.hedge_deadband_usd.min(10.0),
                 "emergency IOC only partially filled; inventory reconciliation required"
@@ -540,6 +583,21 @@ impl Live {
         }
         self.store
             .write("hedge_order.json", &Option::<Value>::None)?;
+        self.hedge_residual(target, final_current, mid, "confirmed_execution_residual")
+    }
+    fn hedge_residual(&self, target: f64, actual: f64, price: f64, reason: &str) -> Result<()> {
+        if (target - actual).abs() * price < 0.01 {
+            return self
+                .store
+                .write("hedge_residual.json", &Option::<Value>::None);
+        }
+        let row = json!({"observed_ms":crate::now_ms(),"coin":self.cfg.hyperliquid.hedge_coin,
+            "target":target,"actual_short":actual,"residual_base":target-actual,
+            "residual_usd":(target-actual).abs()*price,"reason":reason,
+            "action":"recompute from actual inventory next cycle; do not increase size to meet minimum"});
+        self.store.write("hedge_residual.json", &row)?;
+        self.store.event("hedge_residual_deferred", &row)?;
+        tracing::warn!(residual=%row, "hedge dust deferred; exposure remains visible");
         Ok(())
     }
     pub async fn cancel_if_open(&self, coin: &str, cloid: &str) -> Result<()> {
@@ -547,8 +605,11 @@ impl Live {
         journal::observe(&self.store, cloid, &status)?;
         if status["status"] == "order" && status["order"]["status"] == "open" {
             let canceled = self.hl.cancel(coin, cloid).await;
-            if self.store.pending()?.is_some() {
-                canceled?;
+            if let Err(error) = canceled
+                && (self.store.pending()?.is_some()
+                    || !error.is::<crate::hyperliquid::ExchangeRejected>())
+            {
+                return Err(error);
             }
             // An acknowledged rejection can race a fill: the subsequent status is authoritative.
             let after = self.hl.order_status(json!(cloid)).await?;
@@ -580,7 +641,11 @@ impl Live {
         let portfolio = self.portfolio().await?;
         // Inventory is temporarily fully hedged during a multi-venue LP transition.
         if let Err(error) = self.hedge(portfolio.base(), true).await {
-            if d.lp != LpIntent::ExitToQuote || self.store.pending()?.is_some() {
+            if d.lp != LpIntent::ExitToQuote
+                || self.store.pending()?.is_some()
+                || !(error.is::<crate::hyperliquid::ExchangeRejected>()
+                    || error.is::<HedgeBudgetUnavailable>())
+            {
                 return Err(error);
             }
             // An acknowledged insufficient-margin/rejected hedge must not prevent selling risk.
@@ -694,28 +759,34 @@ impl Live {
 
 pub async fn run(c: Config, store: Arc<Store>, once: bool, execute: bool) -> Result<()> {
     recovery::start(&store)?;
+    crate::runtime::status(&store, "starting", json!({"pid":std::process::id()}))?;
     let mut supervisor = crate::monitor::Supervisor::start(c.clone(), store.clone());
     let task = supervisor.task.as_mut().context("monitor task missing")?;
     let result = tokio::select! {
-        result = run_strategy(c, store.clone(), once, execute) => result,
+        result = crate::runtime::retry_reads(&store, Duration::from_secs(c.runtime.read_retry_seconds), once, || async {
+            recovery::start(&store)?;
+            crate::runtime::status(&store, "recovering", json!({"action":"reconcile persisted state"}))?;
+            run_strategy(c.clone(), store.clone(), once, execute).await
+        }) => result,
         result = task => {
             supervisor.task.take();
             match result { Ok(Err(e)) => Err(e.context("monitor failed; strategy stopped")),
                 _ => Err(anyhow::anyhow!("monitor unexpectedly stopped; strategy stopped")) }
         },
-        _ = tokio::signal::ctrl_c() => {
+        _ = crate::runtime::shutdown() => {
             store.event("shutdown", "positions retained; any prepared transaction remains pending for reconciliation")?;
             Ok(())
         }
     };
     let stopped = supervisor.stop().await;
-    if let Err(error) = &result
-        && store
-            .read::<Value>("startup_reconciliation.json")?
-            .is_some_and(|r| r["status"] != "ready")
-    {
+    if let Err(error) = &result {
         recovery::stage(&store, "blocked", json!({"error":format!("{error:#}")}))?;
     }
+    crate::runtime::status(
+        &store,
+        if result.is_ok() { "stopped" } else { "blocked" },
+        json!({"error":result.as_ref().err().map(|e| format!("{e:#}"))}),
+    )?;
     result.and(stopped)
 }
 async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -> Result<()> {
@@ -751,7 +822,7 @@ async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -
             )?;
             reconcile(&c, store.clone()).await?;
         }
-        hl.enable_signing()?;
+        hl.enable_signing().await?;
         let evm = Executor::new(venue.clone(), store.clone())?;
         evm.nonce.refresh().await?.available()?;
         evm.verify_inventory().await?;
@@ -779,12 +850,22 @@ async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -
             )?;
         }
         recovery::save(&store, &c, &strategy, &paper)?;
-        hl.leverage(
-            &c.hyperliquid.hedge_coin,
-            c.hyperliquid.leverage,
-            c.hyperliquid.cross_margin,
-        )
-        .await?;
+        let asset_state = hl.active_asset(&c.hyperliquid.hedge_coin).await?;
+        if asset_state["leverage"]["value"] != c.hyperliquid.leverage
+            || asset_state["leverage"]["type"]
+                != if c.hyperliquid.cross_margin {
+                    "cross"
+                } else {
+                    "isolated"
+                }
+        {
+            hl.leverage(
+                &c.hyperliquid.hedge_coin,
+                c.hyperliquid.leverage,
+                c.hyperliquid.cross_margin,
+            )
+            .await?;
+        }
         if store.read::<Value>("workflow.json")?.is_some() {
             store.event(
                 "recovery",
@@ -849,49 +930,46 @@ async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -
         }
         let now = crate::now_ms();
         let hour = now / 3_600_000;
-        let observed: Result<_> = async {
-            if history.is_empty() || hour != fetched_hour {
-                let count = (c.strategy.vol_long_hours + c.strategy.vol_short_hours + 2)
-                    .max(c.strategy.ema_slow_hours * 3 + 2);
-                history = hl
-                    .candles(
-                        &c.hyperliquid.hedge_coin,
-                        "1h",
-                        now.saturating_sub(count as u64 * 3_600_000),
-                        now,
-                    )
-                    .await?;
-                fetched_hour = hour;
-                if live.is_none() && paper.last_hedge_price > 0.0 {
-                    let funding = hl
-                        .funding_history(&c.hyperliquid.hedge_coin, paper.last_funding_ms + 1, now)
+        let observed: Result<_> =
+            crate::runtime::observe(c.runtime.observation_timeout_seconds, async {
+                if history.is_empty() || hour != fetched_hour {
+                    let count = (c.strategy.vol_long_hours + c.strategy.vol_short_hours + 2)
+                        .max(c.strategy.ema_slow_hours * 3 + 2);
+                    history = hl
+                        .candles(
+                            &c.hyperliquid.hedge_coin,
+                            "1h",
+                            now.saturating_sub(count as u64 * 3_600_000),
+                            now,
+                        )
                         .await?;
-                    paper.apply_funding(&funding)?;
+                    fetched_hour = hour;
+                    if live.is_none() && paper.last_hedge_price > 0.0 {
+                        let funding = hl
+                            .funding_history(
+                                &c.hyperliquid.hedge_coin,
+                                paper.last_funding_ms + 1,
+                                now,
+                            )
+                            .await?;
+                        paper.apply_funding(&funding)?;
+                    }
                 }
-            }
-            let pool = venue.snapshot().await?;
-            let (hp, ht) = hl.market(&c.hyperliquid.hedge_coin).await?;
-            let portfolio = if let Some(l) = &live {
-                l.portfolio().await?
-            } else {
-                paper.mark(pool.price, hp, now, &c);
-                paper.portfolio.clone()
-            };
-            Ok((pool, hp, ht, portfolio))
-        }
-        .await;
-        let (pool, hp, ht, portfolio) = match observed {
-            Ok(value) => value,
-            Err(e) => {
-                tracing::warn!(error=%format!("{e:#}"), "strategy market/account refresh failed; no trades until next valid snapshot");
-                store.event("data_unavailable", format!("{e:#}"))?;
-                if once {
-                    return Err(e);
-                }
-                tokio::select! {_=tokio::time::sleep(Duration::from_secs(c.poll_seconds))=>continue,
-                _=tokio::signal::ctrl_c()=>return Ok(())}
-            }
-        };
+                let pool = venue.snapshot().await?;
+                let (hp, ht) = hl.market(&c.hyperliquid.hedge_coin).await?;
+                let portfolio = if let Some(l) = &live {
+                    l.portfolio().await?
+                } else {
+                    paper.mark(pool.price, hp, now, &c);
+                    paper.portfolio.clone()
+                };
+                Ok((pool, hp, ht, portfolio))
+            })
+            .await;
+        let (pool, hp, ht, portfolio) = observed?;
+        let now = crate::now_ms();
+        crate::runtime::fresh(pool.time_ms, now, c.strategy.max_data_age_seconds)?;
+        crate::runtime::fresh(ht, now, c.strategy.max_data_age_seconds)?;
         let baseline = match store.read::<f64>("equity_baseline.json")? {
             Some(v) => v,
             None => {
@@ -939,10 +1017,16 @@ async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -
             }
         }
         recovery::save(&store, &c, &strategy, &paper)?;
+        crate::runtime::status(
+            &store,
+            "running",
+            json!({"phase":strategy.phase,"pool_time_ms":frame.pool.time_ms,
+            "hedge_time_ms":ht,"residual":store.read::<Value>("hedge_residual.json")?}),
+        )?;
         if once {
             return Ok(());
         }
-        tokio::select! {_=tokio::time::sleep(Duration::from_secs(c.poll_seconds))=>{},_=tokio::signal::ctrl_c()=>{store.event("shutdown","positions retained; no unsolicited flatten on process exit")?;return Ok(())}}
+        tokio::time::sleep(Duration::from_secs(c.poll_seconds)).await;
     }
 }
 
@@ -967,6 +1051,7 @@ pub fn transport_independent_fingerprint(serialized: &str) -> Result<Value> {
                 "nonce_refresh_seconds",
                 "pending_warn_seconds",
                 "owner",
+                "max_quote_age_seconds",
             ],
         ),
         ("hyperliquid", vec!["http_url", "ws_url"]),
@@ -1012,6 +1097,20 @@ pub async fn reconcile(c: &Config, store: Arc<Store>) -> Result<Value> {
         "pending operation belongs to another Hyperliquid account"
     );
     let action = &pending["request"]["action"];
+    if pending["dispatch_state"] == "prepared" {
+        journal::prepare(
+            &store,
+            action,
+            hl.user()?,
+            pending["request"]["nonce"]
+                .as_u64()
+                .context("pending nonce")?,
+        )?;
+        journal::not_submitted(&store, action)?;
+        let result = json!({"status":"not_submitted","reason":"durable pre-dispatch state; no network write began"});
+        store.finish(&result)?;
+        return Ok(result);
+    }
     if action["type"] == "order" {
         journal::prepare(
             &store,
@@ -1046,26 +1145,21 @@ pub async fn reconcile(c: &Config, store: Arc<Store>) -> Result<Value> {
             Ok(open)
         }
         Some("updateLeverage") => {
-            let account = hl.account().await?;
             let (asset, _) = hl.asset(&c.hyperliquid.hedge_coin).await?;
             ensure!(action["asset"] == asset, "different leverage asset");
-            let pos = account["assetPositions"]
-                .as_array()
-                .context("positions")?
-                .iter()
-                .find(|p| p["position"]["coin"] == c.hyperliquid.hedge_coin);
+            let state = hl.active_asset(&c.hyperliquid.hedge_coin).await?;
             ensure!(
-                pos.is_some_and(|p| p["position"]["leverage"]["value"] == action["leverage"]
-                    && p["position"]["leverage"]["type"]
+                state["leverage"]["value"] == action["leverage"]
+                    && state["leverage"]["type"]
                         == if action["isCross"] == true {
                             "cross"
                         } else {
                             "isolated"
-                        }),
+                        },
                 "cannot verify leverage change; inspect account configuration"
             );
-            store.finish(&account)?;
-            Ok(account)
+            store.finish(&state)?;
+            Ok(state)
         }
         _ => bail!(
             "pending non-order action requires checking its effect: {}",

@@ -1,5 +1,7 @@
 # 状态持久化与启动对账
 
+当前版本另有 `runtime_health.json`（决策完成时间与降级状态）、`hedge_residual.json`（未完全对冲的尾差）、`hl_identity.json`（已验证的签名账户关系）。`orders.json` 现在是日常台账，较早终态订单保存在 `order_archive/`，事件轮转到 `event_archive/`；容量与升级说明见 [运行可靠性与验收](production.md)。
+
 执行状态存放在配置的 `state_dir`。200 美元模拟配置使用 `data/paper-200/`；其他配置使用各自目录。必须保留整个目录，不能只复制持仓文件。独占进程锁防止两个交易进程共用账本；只读 `status`/`monitor` 可以同时运行。
 
 ## 文件记录

@@ -76,6 +76,11 @@ enum Command {
     Reconcile,
     /// Inspect persisted state and unresolved operations; no key required.
     Status,
+    /// Fail unless recent completed strategy decisions prove the runner is healthy.
+    Health {
+        #[arg(long, default_value_t = 120)]
+        max_age_seconds: u64,
+    },
     /// Replay canonical completed hourly Candle[] JSON; LP fees excluded.
     Replay {
         #[arg(long)]
@@ -254,6 +259,7 @@ async fn main() -> Result<()> {
     let read_only = matches!(
         &cli.command,
         Command::Status
+            | Command::Health { .. }
             | Command::Monitor { .. }
             | Command::Info { .. }
             | Command::Watch { .. }
@@ -265,11 +271,12 @@ async fn main() -> Result<()> {
     let store = Arc::new(if read_only {
         Store::readonly(&c.state_dir)
     } else {
-        Store::open(&c.state_dir)?
+        Store::open_with_policy(&c.state_dir, c.storage.clone())?
     });
     let mut hl = Client::new(c.hyperliquid.clone(), store.clone())?;
     match cli.command {
         Command::Check => unreachable!(),
+        Command::Health { max_age_seconds } => print(lp_maker::runtime::check_health(&store, max_age_seconds)?),
         Command::Monitor { seconds } => lp_maker::monitor::standalone(c, store, seconds).await,
         Command::Run { once, execute } => engine::run(c, store, once, execute).await,
         Command::Status => {
@@ -283,7 +290,9 @@ async fn main() -> Result<()> {
                 "nfts":store.read::<Value>("nfts.json")?,"pending":pending,"workflow":store.read::<Value>("workflow.json")?,
                 "orders":store.read::<Value>("orders.json")?,"open_orders":store.read::<Value>("open_orders.json")?,
                 "live_inventory":store.read::<Value>("live_inventory.json")?,"lp_inventory":store.read::<Value>("lp_inventory.json")?,
-                "nonce":store.read::<Value>("evm_nonce.json")?,"startup_reconciliation":store.read::<Value>("startup_reconciliation.json")?}))
+                "nonce":store.read::<Value>("evm_nonce.json")?,"startup_reconciliation":store.read::<Value>("startup_reconciliation.json")?,
+                "runtime_health":store.read::<Value>("runtime_health.json")?,"hedge_residual":store.read::<Value>("hedge_residual.json")?,
+                "hl_identity":store.read::<Value>("hl_identity.json")?}))
         },
         Command::Reconcile => print(engine::reconcile(&c, store).await?),
         Command::Info { command } => {
@@ -362,7 +371,7 @@ async fn main() -> Result<()> {
                         println!("{}",serde_json::to_string(&e)?);
                     },None=>break},
                     _=report_tick.tick()=>tracing::info!(prices=%latest_prices,positions=%latest_positions,"Hyperliquid status"),
-                    _=&mut end=>break,_=tokio::signal::ctrl_c()=>break
+                    _=&mut end=>break,_=lp_maker::runtime::shutdown()=>break
                 }
             }
             stop_tx.send(true)?;
@@ -393,7 +402,7 @@ async fn main() -> Result<()> {
         }
         Command::Trade { execute, command } => {
             live(&c, execute)?;
-            hl.enable_signing()?;
+            hl.enable_signing().await?;
             let result = match command {
                 TradeCommand::Limit {
                     coin,

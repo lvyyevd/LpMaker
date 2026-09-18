@@ -338,7 +338,7 @@ pub async fn standalone(c: Config, store: Arc<Store>, seconds: u64) -> Result<()
     let task = supervisor.task.as_mut().context("missing monitor task")?;
     tokio::select! {
         r=task=>{r??;return Ok(());},
-        _=tokio::signal::ctrl_c()=>{},
+        _=crate::runtime::shutdown()=>{},
         _=tokio::time::sleep_until(end)=>{},
     }
     supervisor.stop().await

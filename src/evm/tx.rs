@@ -100,7 +100,7 @@ impl Executor {
         self.send(
             self.venue.manager,
             INfpm::increaseLiquidityCall { params }.abi_encode(),
-            json!({"kind":"increase","layer":position.layer,"token_id":position.token_id,"value_usdg":value,"lower":position.lower,"upper":position.upper,"price":snap.price}),
+            json!({"kind":"increase","layer":position.layer,"token_id":position.token_id,"value_usdg":value,"lower":position.lower,"upper":position.upper,"price":snap.price,"quote_time_ms":snap.time_ms}),
         )
         .await
     }
@@ -229,6 +229,13 @@ impl Executor {
         result
     }
     async fn send_inner(&self, to: Address, data: Vec<u8>, operation: Value) -> Result<Value> {
+        if let Some(quote_time) = operation.get("quote_time_ms") {
+            crate::runtime::fresh(
+                quote_time.as_u64().context("invalid quote time")?,
+                crate::now_ms(),
+                self.venue.cfg.max_quote_age_seconds,
+            )?;
+        }
         ensure!(
             [
                 self.venue.manager,
@@ -273,6 +280,14 @@ impl Executor {
             balance >= U256::from(gas) * U256::from(gas_price),
             "insufficient native ETH for gas"
         );
+        // Approval, simulation and gas RPCs can consume most of the quote lifetime.
+        if let Some(quote_time) = operation.get("quote_time_ms") {
+            crate::runtime::fresh(
+                quote_time.as_u64().context("invalid quote time")?,
+                crate::now_ms(),
+                self.venue.cfg.max_quote_age_seconds,
+            )?;
+        }
         let tx = TxLegacy {
             chain_id: Some(self.venue.cfg.chain_id),
             nonce,
@@ -457,7 +472,7 @@ impl Executor {
         self.send(
             self.venue.manager,
             INfpm::mintCall { params }.abi_encode(),
-            json!({"kind":"mint","layer":layer,"value_usdg":value,"half_width":width,"tick_lower":tl,"tick_upper":tu,"raw_base":rb.to_string(),"raw_quote":rq.to_string(),"price":snap.price}),
+            json!({"kind":"mint","layer":layer,"value_usdg":value,"half_width":width,"tick_lower":tl,"tick_upper":tu,"raw_base":rb.to_string(),"raw_quote":rq.to_string(),"price":snap.price,"quote_time_ms":snap.time_ms}),
         )
         .await
     }
@@ -527,7 +542,7 @@ impl Executor {
         self.send(
             self.venue.manager,
             INfpm::multicallCall { data: calls }.abi_encode(),
-            json!({"kind":"burn","layer":pos.layer,"token_id":pos.token_id,"raw_liquidity":pos.raw_liquidity,"lower":pos.lower,"upper":pos.upper,"price":snap.price}),
+            json!({"kind":"burn","layer":pos.layer,"token_id":pos.token_id,"raw_liquidity":pos.raw_liquidity,"lower":pos.lower,"upper":pos.upper,"price":snap.price,"quote_time_ms":snap.time_ms}),
         )
         .await
     }
@@ -579,7 +594,7 @@ impl Executor {
         self.send(
             self.venue.router,
             data,
-            json!({"kind":"swap","sell_base":sell_base,"input_token":token_in,"output_token":token_out,"raw_input":input.to_string(),"raw_min_output":min_out.to_string(),"price":s.price,"slippage_bps":self.venue.cfg.slippage_bps}),
+            json!({"kind":"swap","sell_base":sell_base,"input_token":token_in,"output_token":token_out,"raw_input":input.to_string(),"raw_min_output":min_out.to_string(),"price":s.price,"quote_time_ms":s.time_ms,"slippage_bps":self.venue.cfg.slippage_bps}),
         )
         .await
     }

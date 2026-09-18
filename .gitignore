@@ -2,4 +2,3 @@
 /data/
 .env
 *.key
-config/local.toml

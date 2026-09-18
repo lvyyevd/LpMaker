@@ -7,6 +7,7 @@ pub mod logging;
 pub mod math;
 pub mod monitor;
 pub mod recovery;
+pub mod runtime;
 pub mod store;
 pub mod strategy;
 pub mod stream;

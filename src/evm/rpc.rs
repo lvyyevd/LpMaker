@@ -51,7 +51,14 @@ impl Rpc {
                     };
                     tracing::warn!(method, id, attempt=i+1, elapsed_ms=start.elapsed().as_millis(), error=%error, "RPC transport failed");
                     if i + 1 == attempts {
-                        return Err(error);
+                        return if method == "eth_sendRawTransaction" {
+                            Err(error)
+                        } else {
+                            Err(crate::runtime::ReadUnavailable(format!(
+                                "RPC {method} transport unavailable: {error:#}"
+                            ))
+                            .into())
+                        };
                     }
                     tokio::time::sleep(Duration::from_secs(1 << i)).await;
                     continue;

@@ -19,6 +19,23 @@ pub struct Order {
     pub terminal: bool,
     pub exchange: Value,
 }
+pub fn validate_new_ids(store: &Store, action: &Value) -> Result<()> {
+    if action["type"] != "order" {
+        return Ok(());
+    }
+    let ledger = store.read::<Orders>("orders.json")?.unwrap_or_default();
+    let mut seen = std::collections::BTreeSet::new();
+    for wire in action["orders"].as_array().context("order intents")? {
+        let id = wire["c"].as_str().context("client ID required")?;
+        ensure!(
+            seen.insert(id.to_ascii_lowercase())
+                && !ledger.keys().any(|old| old.eq_ignore_ascii_case(id))
+                && store.archived_order(id)?.is_none(),
+            "client order ID already used; reject before preparing a new mutation"
+        );
+    }
+    Ok(())
+}
 pub fn prepare(store: &Store, action: &Value, user: &str, nonce: u64) -> Result<()> {
     if action["type"] != "order" {
         return Ok(());
@@ -26,6 +43,18 @@ pub fn prepare(store: &Store, action: &Value, user: &str, nonce: u64) -> Result<
     let hedge = store
         .read::<Value>("hedge_order.json")?
         .unwrap_or(Value::Null);
+    let pending = store.pending()?.unwrap_or(Value::Null);
+    for wire in action["orders"]
+        .as_array()
+        .context("order intents missing")?
+    {
+        ensure!(
+            store
+                .archived_order(wire["c"].as_str().context("cloid")?)?
+                .is_none(),
+            "client order ID already archived; do not reuse or resubmit"
+        );
+    }
     store.update::<Orders>("orders.json", |ledger| {
         for wire in action["orders"]
             .as_array()
@@ -54,7 +83,8 @@ pub fn prepare(store: &Store, action: &Value, user: &str, nonce: u64) -> Result<
                     cloid: cloid.into(),
                     oid: None,
                     user: user.into(),
-                    managed_hedge: hedge["cloid"] == cloid,
+                    managed_hedge: hedge["cloid"] == cloid
+                        || pending["hedge_intent"]["cloid"] == cloid,
                     submitted_ms: nonce,
                     observed_ms: 0,
                     wire: wire.clone(),
@@ -127,6 +157,7 @@ pub fn terminal_status(status: &str) -> bool {
     matches!(
         status,
         "filled"
+            | "not_submitted"
             | "canceled"
             | "rejected"
             | "marginCanceled"
@@ -154,6 +185,28 @@ pub fn terminal_status(status: &str) -> bool {
             | "oracleRejected"
             | "perpMaxPositionRejected"
     )
+}
+/// Only a durable pre-dispatch state proves the network send never began.
+pub fn not_submitted(store: &Store, action: &Value) -> Result<()> {
+    if action["type"] == "order" {
+        store.update::<Orders>("orders.json", |ledger| {
+            for wire in action["orders"].as_array().context("order intents")? {
+                let id = wire["c"].as_str().context("cloid")?;
+                if let Some(o) = ledger.get_mut(id) {
+                    ensure!(
+                        o.oid.is_none()
+                            && matches!(o.status.as_str(), "prepared" | "not_submitted"),
+                        "pre-dispatch order has unexpected exchange evidence"
+                    );
+                    o.status = "not_submitted".into();
+                    o.terminal = true;
+                    o.observed_ms = crate::now_ms();
+                }
+            }
+            Ok(())
+        })?;
+    }
+    store.write("hedge_order.json", &Option::<Value>::None)
 }
 pub fn observe(store: &Store, id: &str, response: &Value) -> Result<()> {
     // Retain the raw observation even when it cannot resolve the order.
@@ -241,4 +294,31 @@ pub fn managed_open_orders(store: &Store, open: &Value, coin: &str) -> Result<Ve
         "local unresolved order absent from exchange open orders; retry reconciliation"
     );
     Ok(ids)
+}
+pub fn compact(store: &Store) -> Result<()> {
+    let pointer = store
+        .read::<Value>("hedge_order.json")?
+        .unwrap_or(Value::Null);
+    let pending = store.pending()?.unwrap_or(Value::Null);
+    // Never prune any ledger entry while a mutation still needs reconciliation.
+    if !pending.is_null() {
+        return Ok(());
+    }
+    store.update::<Orders>("orders.json", |ledger| {
+        let mut terminal: Vec<_> = ledger
+            .values()
+            .filter(|o| o.terminal && pointer["cloid"] != o.cloid)
+            .map(|o| (o.observed_ms, o.cloid.clone()))
+            .collect();
+        terminal.sort();
+        let remove = terminal
+            .len()
+            .saturating_sub(store.policy.terminal_orders_keep);
+        for (_, id) in terminal.into_iter().take(remove) {
+            let order = ledger.get(&id).context("terminal order disappeared")?;
+            store.archive_order(&id, &serde_json::to_value(order)?)?;
+            ledger.remove(&id);
+        }
+        Ok(())
+    })
 }

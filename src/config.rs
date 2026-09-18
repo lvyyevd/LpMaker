@@ -23,6 +23,10 @@ pub struct Config {
     pub monitoring: MonitoringConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub runtime: RuntimeConfig,
+    #[serde(default)]
+    pub storage: StorageConfig,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -70,6 +74,45 @@ pub struct LiquidityConfig {
     pub slippage_bps: u32,
     pub deadline_seconds: u64,
     pub max_gas_native: f64,
+    #[serde(default = "default_quote_age")]
+    pub max_quote_age_seconds: u64,
+}
+fn default_quote_age() -> u64 {
+    60
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RuntimeConfig {
+    pub read_retry_seconds: u64,
+    pub observation_timeout_seconds: u64,
+}
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            read_retry_seconds: 5,
+            observation_timeout_seconds: 45,
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StorageConfig {
+    pub event_segment_bytes: u64,
+    pub event_retained_segments: usize,
+    pub terminal_orders_keep: usize,
+    pub order_archive_max_bytes: u64,
+    pub min_free_bytes: u64,
+}
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            event_segment_bytes: 16 * 1024 * 1024,
+            event_retained_segments: 32,
+            terminal_orders_keep: 1000,
+            order_archive_max_bytes: 256 * 1024 * 1024,
+            min_free_bytes: 256 * 1024 * 1024,
+        }
+    }
 }
 fn default_evm_ws() -> String {
     "wss://robinhood-rpc.publicnode.com".into()
@@ -184,6 +227,21 @@ impl Config {
         Ok(c)
     }
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.runtime.read_retry_seconds > 0
+                && self.runtime.read_retry_seconds <= 300
+                && self.runtime.observation_timeout_seconds > 0
+                && self.runtime.observation_timeout_seconds <= self.strategy.max_data_age_seconds
+                && self.liquidity.max_quote_age_seconds > 0,
+            "invalid observation/retry limits"
+        );
+        ensure!(
+            self.storage.event_segment_bytes >= 1024
+                && self.storage.event_retained_segments > 0
+                && self.storage.terminal_orders_keep > 0
+                && self.storage.order_archive_max_bytes >= 1024,
+            "invalid storage retention limits"
+        );
         validate_url(&self.hyperliquid.http_url, &["https", "http"])?;
         validate_url(&self.hyperliquid.ws_url, &["wss", "ws"])?;
         validate_url(&self.liquidity.rpc_url, &["https", "http", "wss", "ws"])?;
