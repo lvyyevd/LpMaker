@@ -25,10 +25,10 @@ emergency_slippage_bps = 30
 [liquidity]
 kind = "uniswap_v3"
 chain_id = 4663
-rpc_url = "https://robinhood-rpc.publicnode.com"
+rpc_url = "http://10.176.50.49:18547"
 # History only: PublicNode free eth_getLogs may require a personal token.
-archive_rpc_url = "https://rpc.mainnet.chain.robinhood.com"
-ws_url = "wss://robinhood-rpc.publicnode.com"
+archive_rpc_url = "http://10.176.50.49:18547"
+ws_url = "ws://10.176.50.49:18548"
 # Optional public LP address for read-only monitoring; no private key needed.
 # owner = "0x..."
 nonce_refresh_seconds = 30
