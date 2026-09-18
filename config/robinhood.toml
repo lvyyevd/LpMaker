@@ -95,8 +95,11 @@ reconnect_initial_ms = 1000
 reconnect_max_seconds = 30
 
 [monitoring]
-hyperliquid_interval_seconds = 30
-robinhood_interval_seconds = 15
+# 中文状态摘要每分钟打印；数据刷新独立进行。
+hyperliquid_interval_seconds = 60
+robinhood_interval_seconds = 60
+hyperliquid_refresh_seconds = 30
+robinhood_refresh_seconds = 15
 volume_window_seconds = 300
 backfill_blocks = 6000
 refresh_timeout_seconds = 45

@@ -26,8 +26,11 @@ reconnect_initial_ms = 1000
 reconnect_max_seconds = 30
 
 [monitoring]
-hyperliquid_interval_seconds = 30
-robinhood_interval_seconds = 15
+# 中文状态摘要每分钟打印；数据刷新独立进行。
+hyperliquid_interval_seconds = 60
+robinhood_interval_seconds = 60
+hyperliquid_refresh_seconds = 30
+robinhood_refresh_seconds = 15
 volume_window_seconds = 300
 backfill_blocks = 6000
 refresh_timeout_seconds = 45
@@ -64,12 +67,12 @@ cargo run --locked -- --config config/paper-200.toml run
 
 5 分钟成交量通过区块时间二分定位起点，每次只汇总确认区块中的 Swap，按 USDG 一侧绝对金额计一次，另外报告 WETH 数量。部分节点的日志 `blockTimestamp` 为 `0x0`，所以不依赖这个可选字段。历史请求按 200 个区块分批、最多 4 路并行；按 `(blockHash, logIndex)` 去重，发现游标区块重组则重新构建窗口。
 
-历史补数与 LP 快照刷新独立运行。输出包含 `complete`、`as_of_ms`、`volume_age_ms`、错误和刷新状态：首次补数或慢节点期间不把不完整数据当成完整的 5 分钟成交量。打印周期不代表所有上游数据都恰好同时更新。
+历史补数与 LP 快照刷新独立运行。输出包含 `complete`、`as_of_ms`、`volume_age_ms`、错误和刷新状态：首次补数或慢节点期间不把不完整数据当成完整的 5 分钟成交量。打印周期不代表所有上游数据都恰好同时更新。状态摘要每 60 秒打印，账户仍每 30 秒、LP 和成交量仍每 15 秒独立刷新，策略轮询及 WS 实时接收频率不受影响。
 
 ## 状态与收益口径
 
-- Hyperliquid 每 30 秒：订阅币种的价格、数据时间、连接状态、实际账户余额/持仓、模拟空单（如适用）。缺少账户地址与真实零持仓分开表示。
-- Robinhood 每 15 秒：确认区块价格、每层上下界、区间内外、区间内相对位置、距两侧百分比、区间本金市值、近期确认交易量、策略状态及收益口径。
+- Hyperliquid 每 60 秒中文摘要：订阅币种的价格、数据时间、连接状态、实际账户余额/持仓、模拟空单（如适用）。缺少账户地址与真实零持仓分开表示。
+- Robinhood 每 60 秒中文摘要：确认区块价格、每层上下界、区间内外、区间内相对位置、区间本金市值、近期确认交易量、策略状态及收益口径。
 - Paper：模拟净值和损益、模拟换币成本/对冲费/资金费；LP 手续费和 gas 没有模拟，因此显示未知而不是编造收益。
 - Live：待领取费用按实际链上 fee growth 计算；组合显示相对首次观察基准的账面变化。该变化含待领费用，但不扣链上 gas、也未扣除外部入出金影响，不能直接当作完整净利润。
 - 只读监控没有策略历史基准时，收益显示不可用。历史缓存、账户快照都带时间，失败时保留之前的时间，不把旧数据伪装成新数据。
@@ -85,6 +88,8 @@ cargo run --locked -- --config config/paper-200.toml run
 实盘启动先自动核对未决交易，也可用 `reconcile` 单独处理；它不会盲目换 nonce 重发。持仓、订单台账和检查点恢复见 [状态持久化与启动对账](recovery.md)。仅变更连接参数可继续使用现有策略状态；资金/策略/账户变更仍被配置指纹拦截。
 
 ## 日志
+
+周期状态在控制台显示多行中文摘要；`run` 的完整 JSON 报告仍保存到状态目录的 `monitor_hyperliquid.json` / `monitor_robinhood.json`，并在 `debug` 级别输出。打印周期与刷新周期不属于交易配置指纹，升级时沿用现有状态目录，不必清空持仓或旧状态。
 
 控制台输出和 `data/logs/lpmaker.<日期>.jsonl` 同时写入，按天轮转、保留 14 个匹配文件。级别由 `[logging].level` 控制，不受启动环境中通用 `RUST_LOG=warn` 遮挡；可改为 `debug` 查看每个 RPC 的方法、request ID、耗时及重试次数。
 

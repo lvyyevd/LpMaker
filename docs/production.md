@@ -58,7 +58,7 @@ min_free_bytes = 268435456
 
 建仓前资金检查、实际新增对冲单检查和持仓净值均使用此口径。配置的保证金预算仍限制头寸，账户里有 79.60 USDC 不会自动把策略保证金预算从 60 改为 79.60。短仓检查使用卖出方向的额度，不能拿买入方向的额度替代。
 
-原生 WS 增加 `spotState`、各监听币种的 `activeAssetData`。每 30 秒状态日志单独显示 `collateral`；原始 WS 事件保存在 `account_ws` 中，不能覆盖经过账户模式核对的 REST 资金快照。断线清空 WS 缓存，REST 失败保留旧观察时间与错误，不假装数据已刷新。
+原生 WS 增加 `spotState`、各监听币种的 `activeAssetData`。每 60 秒中文状态摘要单独显示已核对 USDC 权益与开空可用保证金（原始报告字段 `collateral`），账户数据仍每 30 秒刷新；原始 WS 事件保存在 `account_ws` 中，不能覆盖经过账户模式核对的 REST 资金快照。断线清空 WS 缓存，REST 失败保留旧观察时间与错误，不假装数据已刷新。
 
 修复会把原先漏计的统一账户 USDC 计入组合净值。为避免将余额修正显示成策略盈利，新建收益基准同时记录 `equity_baseline_basis.json`；旧基准或不同口径基准不被覆盖。统一账户旧基准无法比较时，日志标记 `accounting_basis_changed`，`equity_change_usd` 为 `null`。当前净值仍显示，风险高水位和暂停状态仍保留。
 

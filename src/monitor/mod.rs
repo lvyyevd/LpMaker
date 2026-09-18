@@ -1,3 +1,4 @@
+pub mod display;
 pub mod volume;
 use crate::{
     config::{Config, Mode},
@@ -121,6 +122,8 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
     let mut jobs = JoinSet::new();
     let mut htimer = interval(c.monitoring.hyperliquid_interval_seconds);
     let mut etimer = interval(c.monitoring.robinhood_interval_seconds);
+    let mut hrefresh = interval(c.monitoring.hyperliquid_refresh_seconds);
+    let mut erefresh = interval(c.monitoring.robinhood_refresh_seconds);
     let mut hh = Health::default();
     let mut eh = Health::default();
     let mut prices = BTreeMap::<String, Value>::new();
@@ -159,7 +162,7 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                         "allMids"=>{for coin in &c.hyperliquid.coins { if !e.data["mids"][coin].is_null() {
                             prices.insert(coin.clone(),json!({"price":e.data["mids"][coin],"received_ms":e.received_ms,"source":"native_ws"}));
                         }}},
-                        "clearinghouseState"|"spotState"|"activeAssetData"=>{
+                        "clearinghouseState"|"spotState"|"activeAssetData"|"openOrders"=>{
                             // Raw WS messages cannot overwrite a mode-aware REST collateral snapshot.
                             if !account_ws.is_object() {account_ws=json!({});}
                             let key=if e.channel=="activeAssetData" {format!("activeAssetData:{}",e.data["coin"].as_str().unwrap_or("unknown"))} else {e.channel.clone()};
@@ -182,11 +185,14 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                 }},
                 _=htimer.tick()=>{
                     let paper = if c.mode==Mode::Paper {store.read::<Paper>("paper.json")?} else {None};
-                    let report=json!({"time_ms":crate::now_ms(),"ws":hh,"prices":prices,"account":account,"collateral":account["state"]["lpMakerCollateral"],"account_ws":account_ws,
+                    let report=json!({"time_ms":crate::now_ms(),"mode":c.mode,"max_data_age_seconds":c.strategy.max_data_age_seconds,"ws":hh,"prices":prices,"account":account,"collateral":account["state"]["lpMakerCollateral"],"account_ws":account_ws,
                         "account_configured":hl.user().is_ok(),"account_age_ms":account["observed_ms"].as_u64().map(|t|crate::now_ms().saturating_sub(t)),"ws_data_age_ms":hh.last_data_ms.map(|t|crate::now_ms().saturating_sub(t)),"refresh_pending":hbusy,"last_refresh_error":herr,
                         "paper_position":paper.map(|p|json!({"coin":c.hyperliquid.hedge_coin,"short_base":p.portfolio.short_base,"equity":p.portfolio.hedge_equity,"pending_order":p.pending}))});
-                    tracing::info!(report=%report,"Hyperliquid status");
+                    tracing::info!("\n{}",display::hyperliquid(&report));
+                    tracing::debug!(report=%report,"Hyperliquid status raw snapshot");
                     if store.is_writable() {store.write("monitor_hyperliquid.json",&report)?;}
+                },
+                _=hrefresh.tick()=>{
                     if !hbusy {
                         hbusy=true;let client=hl.clone();let timeout=c.monitoring.refresh_timeout_seconds;
                         jobs.spawn(async move { Refresh::Hyperliquid(match tokio::time::timeout(Duration::from_secs(timeout),async {
@@ -197,10 +203,13 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                     }
                 },
                 _=etimer.tick()=>{
-                    let report=json!({"time_ms":crate::now_ms(),"ws":eh,"snapshot":chain,
+                    let report=json!({"time_ms":crate::now_ms(),"mode":c.mode,"max_data_age_seconds":c.strategy.max_data_age_seconds,"ws":eh,"ws_data_age_ms":eh.last_data_ms.map(|t|crate::now_ms().saturating_sub(t)),"snapshot":chain,
                         "snapshot_age_ms":chain["observed_ms"].as_u64().map(|t|crate::now_ms().saturating_sub(t)),"volume_age_ms":volume_report["as_of_ms"].as_u64().map(|t|crate::now_ms().saturating_sub(t)),"last_unconfirmed_swap":last_swap,"refresh_pending":ebusy,"last_refresh_error":eerr,"recent_volume":volume_report,"volume_refresh_pending":vbusy,"volume_error":volume_error});
-                    tracing::info!(report=%report,"Robinhood LP status");
+                    tracing::info!("\n{}",display::robinhood(&report));
+                    tracing::debug!(report=%report,"Robinhood LP status raw snapshot");
                     if store.is_writable() {store.write("monitor_robinhood.json",&report)?;}
+                },
+                _=erefresh.tick()=>{
                     if !ebusy {
                         ebusy=true;let cfg=c.clone();let v=venue.clone();let s=store.clone();
                         jobs.spawn(async move { Refresh::Robinhood(match tokio::time::timeout(Duration::from_secs(cfg.monitoring.refresh_timeout_seconds),
@@ -237,6 +246,7 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
 async fn refresh_chain(c: &Config, venue: &UniswapV3, store: &Store) -> Result<Value> {
     let snapshot = venue.snapshot().await?;
     let phase = store.read::<Value>("strategy.json")?;
+    let mut positions_observed = true;
     let (positions, pnl) = if c.mode == Mode::Paper {
         if let Some(mut p) = store.read::<Paper>("paper.json")? {
             for pos in &mut p.portfolio.positions {
@@ -248,6 +258,7 @@ async fn refresh_chain(c: &Config, venue: &UniswapV3, store: &Store) -> Result<V
                 "swap_costs_usd":p.swap_costs,"funding_pnl_usd":p.funding_pnl,"lp_fees_usd":Value::Null});
             (p.portfolio.positions, pnl)
         } else {
+            positions_observed = false;
             (
                 vec![],
                 json!({"status":"paper_strategy_not_started","pnl_usd":Value::Null}),
@@ -279,6 +290,7 @@ async fn refresh_chain(c: &Config, venue: &UniswapV3, store: &Store) -> Result<V
                 .collect::<Vec<_>>();
             venue.positions(owner, &ids).await?
         } else {
+            positions_observed = false;
             vec![]
         };
         let pnl = if let Some(obs) = store.read::<PortfolioObservation>("portfolio.json")? {
@@ -293,7 +305,7 @@ async fn refresh_chain(c: &Config, venue: &UniswapV3, store: &Store) -> Result<V
         (positions, pnl)
     };
     Ok(
-        json!({"observed_ms":crate::now_ms(),"pool":snapshot,"positions":positions_report(&positions,snapshot.price,c.mode==Mode::Paper),
+        json!({"observed_ms":crate::now_ms(),"pool":snapshot,"positions_observed":positions_observed,"positions":positions_report(&positions,snapshot.price,c.mode==Mode::Paper),
         "returns":pnl,"strategy":phase}),
     )
 }

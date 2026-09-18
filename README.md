@@ -25,10 +25,10 @@ cargo run --locked -- run --once
 cargo run --locked -- run
 ```
 
-`run` 自动启动 Hyperliquid 官方 WebSocket 与 Robinhood PublicNode WebSocket 监听，并按 `poll_seconds` 周期使用可核对的 RPC/HTTP 快照决策。独立 `monitor` 是只读监控，不加载私钥、不下单，可与策略同时运行；`pool watch` 同样进入这套监控。`watch` 保留 Hyperliquid 原始 JSONL 流，同时每 30 秒输出价格、账户持仓摘要。
+`run` 自动启动 Hyperliquid 官方 WebSocket 与 Robinhood PublicNode WebSocket 监听，并按 `poll_seconds` 周期使用可核对的 RPC/HTTP 快照决策。独立 `monitor` 是只读监控，不加载私钥、不下单，可与策略同时运行；`pool watch` 同样进入这套监控。`watch` 保留 Hyperliquid 原始 JSONL 流，同时每 60 秒输出中文价格、持仓和挂单摘要；统一账户资金核对请使用 `monitor`。
 
 ```bash
-# 只读监听两端：默认每 30 秒输出 Hyperliquid，每 15 秒输出 LP 状态
+# 只读监听两端：默认每 60 秒输出两端中文状态摘要
 cargo run --locked -- --config config/local.toml monitor
 # 有时限的只读连通检查
 cargo run --locked -- --config config/local.toml monitor --seconds 90
@@ -37,6 +37,8 @@ cargo run --locked -- --config config/paper-200.toml run
 ```
 
 `hyperliquid.account` 填实际账户地址即可订阅真实持仓；未填写时输出 `account_not_configured`，不会把未知持仓当成零。Paper 模式另外标记模拟空单。实盘 LP 的只读查看可填写 `liquidity.owner`（公开地址）；运行实盘后也会从持久化的执行钱包身份读取，不会为监控提取私钥。
+
+状态摘要的打印频率与数据刷新分开：Hyperliquid 账户仍每 30 秒刷新，LP 与成交量仍每 15 秒刷新；策略继续使用 `poll_seconds`，WebSocket 实时接收。`run` 的原始结构化报告保留在状态目录的 `monitor_hyperliquid.json` 和 `monitor_robinhood.json`，`debug` 级别也会输出。缺失数据标为待获取，待领取手续费与组合净值变动分别显示；净值变动未扣 Gas、未校正出入金，不能直接当作净利润。
 
 连接、nonce、日志配置和验证结果见 [监听与生命周期](docs/lifecycle.md)。持仓、限价单、策略阶段的保存文件及启动对账顺序见 [状态持久化与启动对账](docs/recovery.md)。
 
@@ -91,7 +93,7 @@ cargo run -- status
 
 查询账户前在配置中填写 `hyperliquid.account`，应填写账户所有者地址，**不是 API agent 的地址**。
 
-账户查询、实盘净值和保证金检查会自动识别账户模式。标准账户沿用原生永续余额；统一账户从 `spotClearinghouseState` 读取 USDC 总额，并从对冲币种的 `activeAssetData.availableToTrade` 读取方向对应的可交易保证金。`info account` 的 `lpMakerCollateral` 和每 30 秒日志的 `collateral` 是程序采用的资金口径；保留的原始 `marginSummary` / `withdrawable` 在统一账户下仍可能为 0。没有持仓时维持保证金为 0 不表示没有可用资金。详情见 [统一账户资金读取](docs/production.md#统一账户资金读取)。
+账户查询、实盘净值和保证金检查会自动识别账户模式。标准账户沿用原生永续余额；统一账户从 `spotClearinghouseState` 读取 USDC 总额，并从对冲币种的 `activeAssetData.availableToTrade` 读取方向对应的可交易保证金。`info account` 的 `lpMakerCollateral` 和每分钟中文摘要的“已核对 USDC 权益”（原始快照中的 `collateral`）是程序采用的资金口径；保留的原始 `marginSummary` / `withdrawable` 在统一账户下仍可能为 0。没有持仓时维持保证金为 0 不表示没有可用资金。详情见 [统一账户资金读取](docs/production.md#统一账户资金读取)。
 
 ```bash
 cargo run -- --config config/local.toml info account

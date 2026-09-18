@@ -163,8 +163,11 @@ impl Default for WebSocketConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MonitoringConfig {
+    /// Human-readable status printing only; independent of observation refreshes.
     pub hyperliquid_interval_seconds: u64,
     pub robinhood_interval_seconds: u64,
+    pub hyperliquid_refresh_seconds: u64,
+    pub robinhood_refresh_seconds: u64,
     pub volume_window_seconds: u64,
     pub backfill_blocks: u64,
     pub refresh_timeout_seconds: u64,
@@ -172,8 +175,10 @@ pub struct MonitoringConfig {
 impl Default for MonitoringConfig {
     fn default() -> Self {
         Self {
-            hyperliquid_interval_seconds: 30,
-            robinhood_interval_seconds: 15,
+            hyperliquid_interval_seconds: 60,
+            robinhood_interval_seconds: 60,
+            hyperliquid_refresh_seconds: 30,
+            robinhood_refresh_seconds: 15,
             volume_window_seconds: 300,
             backfill_blocks: 6000,
             refresh_timeout_seconds: 45,
@@ -280,6 +285,8 @@ impl Config {
         ensure!(
             self.monitoring.hyperliquid_interval_seconds > 0
                 && self.monitoring.robinhood_interval_seconds > 0
+                && self.monitoring.hyperliquid_refresh_seconds > 0
+                && self.monitoring.robinhood_refresh_seconds > 0
                 && self.monitoring.volume_window_seconds > 0
                 && self.monitoring.backfill_blocks > 0
                 && self.monitoring.backfill_blocks <= 100_000

@@ -27,7 +27,7 @@ struct Cli {
 enum Command {
     /// Validate local config without network or keys.
     Check,
-    /// Read-only native WS monitoring with 30s Hyperliquid / 15s LP reports.
+    /// Read-only native WS monitoring with Chinese status reports every 60s by default.
     Monitor {
         #[arg(long, default_value_t = 0)]
         seconds: u64,
@@ -372,6 +372,9 @@ async fn main() -> Result<()> {
             let mut latest_positions = Value::Null;
             let mut latest_spot = Value::Null;
             let mut latest_capacity = json!({});
+            let mut latest_orders = Value::Null;
+            let mut connected = false;
+            let mut last_data_ms: Option<u64> = None;
             loop {
                 tokio::select! {
                     e=rx.recv()=>match e{Some(e)=>{
@@ -379,10 +382,29 @@ async fn main() -> Result<()> {
                         if e.channel=="clearinghouseState" { latest_positions=json!({"observed_ms":e.received_ms,"data":e.data}); }
                         if e.channel=="spotState" {latest_spot=json!({"observed_ms":e.received_ms,"data":e.data});}
                         if e.channel=="activeAssetData" {let coin=e.data["coin"].as_str().unwrap_or("unknown").to_string();latest_capacity[coin]=json!({"observed_ms":e.received_ms,"data":e.data});}
-                        if e.channel=="connected" || e.channel=="disconnected" {latest_prices=Value::Null;latest_positions=Value::Null;latest_spot=Value::Null;latest_capacity=json!({});}
+                        if e.channel=="openOrders" {latest_orders=json!({"observed_ms":e.received_ms,"data":e.data});}
+                        match e.channel.as_str() {
+                            "connected"|"disconnected"=>{connected=e.channel=="connected";last_data_ms=None;latest_prices=Value::Null;latest_positions=Value::Null;latest_spot=Value::Null;latest_capacity=json!({});latest_orders=Value::Null;},
+                            "pong"|"subscriptionResponse"=>{},
+                            _=>last_data_ms=Some(e.received_ms),
+                        }
                         println!("{}",serde_json::to_string(&e)?);
                     },None=>break},
-                    _=report_tick.tick()=>tracing::info!(prices=%latest_prices,positions=%latest_positions,spot_state=%latest_spot,available_to_trade=%latest_capacity,"Hyperliquid status"),
+                    _=report_tick.tick()=>{
+                        let now=lp_maker::now_ms();
+                        let prices=coins.iter().filter_map(|coin|{
+                            let p=&latest_prices["mids"][coin];
+                            (!p.is_null()).then(||(coin.clone(),json!({"price":p,"received_ms":latest_prices["observed_ms"]})))
+                        }).collect::<serde_json::Map<_,_>>();
+                        let state=latest_positions["data"].get("clearinghouseState").unwrap_or(&latest_positions["data"]);
+                        let report=json!({"time_ms":now,"max_data_age_seconds":c.strategy.max_data_age_seconds,
+                            "ws":{"connected":connected},"ws_data_age_ms":last_data_ms.map(|t|now.saturating_sub(t)),
+                            "prices":prices,"account_configured":user.is_some(),"account":{"state":state},
+                            "account_age_ms":latest_positions["observed_ms"].as_u64().map(|t|now.saturating_sub(t)),
+                            "account_ws":{"openOrders":latest_orders}});
+                        tracing::info!("\n{}",lp_maker::monitor::display::hyperliquid(&report));
+                        tracing::debug!(prices=%latest_prices,positions=%latest_positions,spot_state=%latest_spot,available_to_trade=%latest_capacity,"Hyperliquid watch raw snapshot");
+                    },
                     _=&mut end=>break,_=lp_maker::runtime::shutdown()=>break
                 }
             }
