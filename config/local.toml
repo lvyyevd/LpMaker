@@ -28,7 +28,7 @@ chain_id = 4663
 rpc_url = "https://robinhood-mainnet.g.alchemy.com/v2/rcbXa2gro1JFYhp6s3OkE"
 # History only: PublicNode free eth_getLogs may require a personal token.
 archive_rpc_url = "https://robinhood-mainnet.g.alchemy.com/v2/rcbXa2gro1JFYhp6s3OkE"
-ws_url = "ws://10.176.50.49:18548"
+ws_url = "wss://soft-fabled-patina.robinhood-mainnet.quiknode.pro/e64d68bda6fb3806266ebb4d9426da61bb5ab90a/"
 # Optional public LP address for read-only monitoring; no private key needed.
 # owner = "0x..."
 nonce_refresh_seconds = 30

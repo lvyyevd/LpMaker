@@ -25,6 +25,39 @@ fn unknown_account_is_distinct_from_confirmed_zero_and_uses_unified_collateral()
 }
 
 #[test]
+fn hedge_residual_preserves_direction_and_age_without_claiming_a_loss() {
+    let mut report = json!({
+        "time_ms":100000, "max_data_age_seconds":60,
+        "hedge_residual":{
+            "observed_ms":99000, "coin":"ETH",
+            "target":0.000052666271088176, "actual_short":0.0001,
+            "residual_base":-0.000047333728911824, "residual_usd":0.11756988255763406,
+            "reason":"within_hedge_deadband"
+        }
+    });
+    let rendered = hyperliquid(&report);
+    assert!(rendered.contains("空单多于目标 0.00004733 ETH，约 0.1176 USD"));
+    assert!(rendered.contains("敞口差额，非盈亏"));
+    assert!(rendered.contains("当时目标空单 0.00005267｜实际空单 0.00010000"));
+    assert!(rendered.contains("允许偏差内，暂不调整"));
+    assert!(rendered.contains("观察：1.0 秒前"));
+
+    report["time_ms"] = json!(200000);
+    assert!(hyperliquid(&report).contains("观察：101.0 秒前（已过期）"));
+    report["hedge_residual"]["target"] = json!(0.02);
+    report["hedge_residual"]["actual_short"] = json!(0.01);
+    report["hedge_residual"]["residual_base"] = json!(0.01);
+    report["hedge_residual"]["residual_usd"] = json!(24.85);
+    report["hedge_residual"]["reason"] = json!("confirmed_execution_residual");
+    let rendered = hyperliquid(&report);
+    assert!(rendered.contains("空单少于目标 0.01000000 ETH，约 24.8500 USD"));
+    assert!(!rendered.contains("允许偏差内"));
+
+    report["hedge_residual"] = json!(null);
+    assert!(!hyperliquid(&report).contains("对冲余量"));
+}
+
+#[test]
 fn lp_fees_and_equity_change_keep_distinct_accounting_and_missing_values() {
     let mut report = json!({
         "mode":"live", "time_ms":1789711566959_u64,

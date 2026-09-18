@@ -98,11 +98,49 @@ fn phase(v: &Value) -> &str {
     }
 }
 
+fn duration(seconds: u64) -> String {
+    format!(
+        "{}小时{:02}分{:02}秒",
+        seconds / 3600,
+        seconds / 60 % 60,
+        seconds % 60
+    )
+}
+fn fee_apr(apr: &Value, paper: bool, stale: bool) -> String {
+    let label = "近1小时手续费 APR";
+    if paper {
+        return format!("{label}：未模拟 LP 手续费");
+    }
+    if stale {
+        return format!("{label}：暂不可用（快照过期或刷新失败）");
+    }
+    let observed = duration(apr["observed_seconds"].as_u64().unwrap_or(0));
+    let Some(pct) = number(&apr["apr_pct"]) else {
+        return format!("{label}：待积累至少1分钟有效样本（已观察 {observed}）");
+    };
+    let coverage = if apr["complete"] == true {
+        "完整1小时".into()
+    } else {
+        format!("仅观察 {observed}，不足1小时，仅供参考")
+    };
+    format!(
+        "{label}：{pct:.2}%｜窗口新增手续费：{} USDG｜平均LP本金：{} USDG｜{coverage}",
+        n(&apr["fees_usdg"], 6),
+        n(&apr["average_principal_usdg"], 4)
+    )
+}
+
 pub fn robinhood(report: &Value) -> String {
     let snapshot = &report["snapshot"];
     let pool = &snapshot["pool"];
     let strategy = &snapshot["strategy"];
     let paper = report["mode"] == "paper";
+    let apr_stale = report["snapshot_age_ms"]
+        .as_u64()
+        .zip(report["max_data_age_seconds"].as_u64())
+        .is_some_and(|(age, limit)| age > limit.saturating_mul(1000))
+        || report["last_refresh_error"].is_string()
+        || snapshot["performance_error"].is_string();
     let mut lines = vec![
         format!(
             "【Robinhood LP 状态｜{}】",
@@ -174,6 +212,25 @@ pub fn robinhood(report: &Value) -> String {
                         format!("{} USDG", n(&pos["unclaimed_fees_usdg"], 6))
                     }
                 ));
+                let held = p_holding(pos);
+                lines.push(format!("    {held}"));
+                lines.push(format!(
+                    "    {}",
+                    fee_apr(&pos["fee_apr_1h"], paper, apr_stale)
+                ));
+                if pos["fee_apr_1h"]["complete"] != true
+                    && let Some(reason) = pos["fee_apr_1h"]["last_reset_reason"].as_str()
+                {
+                    lines.push(format!(
+                        "    采样重新开始：{}",
+                        match reason {
+                            "position_operated" => "检测到领取手续费或流动性调整",
+                            "observation_gap" => "观察中断，缺少连续本金样本",
+                            "chain_changed" => "链上区块发生变化",
+                            _ => "手续费计数不连续",
+                        }
+                    ));
+                }
             }
             // A missing fee/value invalidates the aggregate; do not silently sum only known rows.
             let total = |key: &str| {
@@ -191,6 +248,12 @@ pub fn robinhood(report: &Value) -> String {
                     format!("{} USDG", amount(total("unclaimed_fees_usdg"), 6))
                 }
             ));
+            if !positions.is_empty() {
+                lines.push(format!(
+                    "当前LP合计｜{}",
+                    fee_apr(&snapshot["fee_apr_1h"], paper, apr_stale)
+                ));
+            }
         }
     }
     let volume = &report["recent_volume"];
@@ -232,6 +295,12 @@ pub fn robinhood(report: &Value) -> String {
     ));
     lines.push(if paper { "收益口径：模拟结果，未模拟 LP 手续费与 Gas。".into() }
         else { "收益口径：组合净值变动包含待领手续费，未扣 Gas、未校正出入金，不等于净利润；池子成交量不是个人收益。".into() });
+    if !paper {
+        lines.push("APR口径：按窗口内实际手续费代币增量和时间加权LP本金估算单利年化；不含币价损益、Gas、对冲费用和资金费，不代表未来收益。".into());
+    }
+    if let Some(error) = snapshot["performance_error"].as_str() {
+        lines.push(format!("手续费 APR 计算暂停：{error}"));
+    }
     if report["volume_refresh_pending"] == true {
         lines.push("成交量正在后台补齐。".into());
     }
@@ -240,6 +309,21 @@ pub fn robinhood(report: &Value) -> String {
     }
     refresh_notes(&mut lines, report);
     lines.join("\n")
+}
+
+fn p_holding(pos: &Value) -> String {
+    match pos["holding"]["seconds"].as_u64() {
+        Some(seconds) => format!(
+            "持仓时长：至少 {}（{}）",
+            duration(seconds),
+            if pos["holding"]["source"] == "confirmed_mint" {
+                "从本地建仓确认记录起算"
+            } else {
+                "从首次观察起算，原建仓时间未知"
+            }
+        ),
+        None => "持仓时长：待获取".into(),
+    }
 }
 
 pub fn hyperliquid(report: &Value) -> String {
@@ -351,6 +435,34 @@ pub fn hyperliquid(report: &Value) -> String {
             }
             None => lines.push("当前挂单：等待订单快照，不能视为零挂单".into()),
         }
+    }
+    let residual = &report["hedge_residual"];
+    if residual.is_object() {
+        lines.push(format!(
+            "对冲余量（上次核对）：{} {} {}，约 {} USD（敞口差额，非盈亏）｜观察：{}",
+            match number(&residual["residual_base"]) {
+                Some(v) if v < 0.0 => "空单多于目标",
+                Some(v) if v > 0.0 => "空单少于目标",
+                Some(_) => "空单与目标一致",
+                None => "方向待确认",
+            },
+            amount(number(&residual["residual_base"]).map(f64::abs), 8),
+            text(&residual["coin"]),
+            n(&residual["residual_usd"], 4),
+            observed_age(&residual["observed_ms"], report)
+        ));
+        lines.push(format!(
+            "  当时目标空单 {}｜实际空单 {}｜原因：{}",
+            n(&residual["target"], 8),
+            n(&residual["actual_short"], 8),
+            match residual["reason"].as_str() {
+                Some("within_hedge_deadband") => "允许偏差内，暂不调整",
+                Some("below_opening_minimum_or_lot_precision") => "受最小下单金额或数量精度限制",
+                Some("partial_fill_dust_deferred") => "部分成交后余量受下单限制，待再次核对",
+                Some("confirmed_execution_residual") => "成交核对后仍有余量，待下次调整",
+                _ => "待核对",
+            }
+        ));
     }
     if report["paper_position"].is_object() {
         let p = &report["paper_position"];

@@ -603,7 +603,11 @@ impl Live {
             "action":"recompute from actual inventory next cycle; do not increase size to meet minimum"});
         self.store.write("hedge_residual.json", &row)?;
         self.store.event("hedge_residual_deferred", &row)?;
-        tracing::warn!(residual=%row, "hedge dust deferred; exposure remains visible");
+        if reason == "within_hedge_deadband" {
+            tracing::debug!(residual=%row, "对冲余量位于允许偏差内，暂不调整");
+        } else {
+            tracing::warn!(residual=%row, "对冲仍有未完成余量，后续按实际持仓重新核对");
+        }
         Ok(())
     }
     pub async fn cancel_if_open(&self, coin: &str, cloid: &str) -> Result<()> {

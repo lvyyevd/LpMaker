@@ -67,13 +67,16 @@ impl UniswapV3 {
         ))
     }
     pub async fn token_ids(&self, owner: Address) -> Result<Vec<String>> {
+        self.token_ids_at(owner, "latest").await
+    }
+    pub async fn token_ids_at(&self, owner: Address, block: &str) -> Result<Vec<String>> {
         let count = self
             .rpc
             .words(
                 self.manager,
                 "balanceOf(address)",
                 &[address_word(owner)],
-                "latest",
+                block,
             )
             .await?[0]
             .to::<u64>();
@@ -89,10 +92,10 @@ impl UniswapV3 {
                     self.manager,
                     "tokenOfOwnerByIndex(address,uint256)",
                     &[address_word(owner), U256::from(i)],
-                    "latest",
+                    block,
                 )
                 .await?[0];
-            let p = self.position_words(id, "latest").await?;
+            let p = self.position_words(id, block).await?;
             let t0 = word_address(p[2]);
             let t1 = word_address(p[3]);
             if ((t0 == self.base && t1 == self.quote) || (t0 == self.quote && t1 == self.base))
@@ -295,8 +298,25 @@ impl LiquidityVenue for UniswapV3 {
         })
     }
     async fn positions(&self, owner: &str, ids: &[(String, String)]) -> Result<Vec<LpPosition>> {
-        let owner: Address = owner.parse()?;
         let snap = self.snapshot().await?;
+        Ok(self
+            .position_observations(owner, ids, &snap)
+            .await?
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect())
+    }
+}
+impl UniswapV3 {
+    /// Position amounts and accounting revision all come from the same confirmed block.
+    /// A revision change breaks fee-rate sampling across collection/liquidity operations.
+    pub async fn position_observations(
+        &self,
+        owner: &str,
+        ids: &[(String, String)],
+        snap: &PoolSnapshot,
+    ) -> Result<Vec<(LpPosition, String)>> {
+        let owner: Address = owner.parse()?;
         let block = format!("0x{:x}", snap.block);
         let mut out = vec![];
         for (layer, id) in ids {
@@ -347,18 +367,24 @@ impl LiquidityVenue for UniswapV3 {
             };
             base += units(fb, self.cfg.base_decimals)?;
             quote += units(fq, self.cfg.quote_decimals)?;
-            out.push(LpPosition {
-                layer: layer.clone(),
-                token_id: Some(id.to_string()),
-                lower,
-                upper,
-                liquidity,
-                raw_liquidity: p[7].to_string(),
-                unclaimed_base: units(fb, self.cfg.base_decimals)?,
-                unclaimed_quote: units(fq, self.cfg.quote_decimals)?,
-                base,
-                quote,
-            });
+            out.push((
+                LpPosition {
+                    layer: layer.clone(),
+                    token_id: Some(id.to_string()),
+                    lower,
+                    upper,
+                    liquidity,
+                    raw_liquidity: p[7].to_string(),
+                    unclaimed_base: units(fb, self.cfg.base_decimals)?,
+                    unclaimed_quote: units(fq, self.cfg.quote_decimals)?,
+                    base,
+                    quote,
+                },
+                format!(
+                    "{}:{}:{}:{}:{}:{}:{}",
+                    p[7], p[8], p[9], p[5], p[6], p[10], p[11]
+                ),
+            ));
         }
         Ok(out)
     }

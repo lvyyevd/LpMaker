@@ -1,4 +1,5 @@
 pub mod display;
+pub mod performance;
 pub mod volume;
 use crate::{
     config::{Config, Mode},
@@ -64,6 +65,7 @@ fn positions_report(positions: &[LpPosition], price: f64, paper: bool) -> Vec<Va
         let (base,quote) = crate::math::amounts(p.liquidity,p.lower,p.upper,price);
         json!({"layer":p.layer,"token_id":p.token_id,"lower":p.lower,"upper":p.upper,
             "price_position":range_position(price,p.lower,p.upper),"principal_value_usdg":base*price+quote,
+            "unclaimed_base":p.unclaimed_base,"unclaimed_quote":p.unclaimed_quote,
             "unclaimed_fees_usdg":if paper { None } else { Some(p.unclaimed_base*price+p.unclaimed_quote) }})
     }).collect()
 }
@@ -120,6 +122,38 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
         .await
     });
     let mut jobs = JoinSet::new();
+    let mut performance = match store
+        .read::<performance::History>(performance::FILE)
+        .and_then(|h| {
+            let h = h.unwrap_or_default();
+            h.validate()?;
+            Ok(h)
+        }) {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::warn!(error=%e,"LP APR 历史不可用，将重新积累样本；持仓状态保留");
+            Default::default()
+        }
+    };
+    let history_path = std::path::PathBuf::from(&c.state_dir);
+    let matching_chain = store
+        .read::<Value>("execution_identity.json")?
+        .is_some_and(|v| v["chain_id"] == c.liquidity.chain_id);
+    let holding_starts = match tokio::task::spawn_blocking(move || {
+        if matching_chain {
+            performance::Starts::load(&history_path)
+        } else {
+            Ok(Default::default())
+        }
+    })
+    .await?
+    {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::warn!(error=%e,"旧建仓时间不可用，将按首次观察时间显示");
+            Default::default()
+        }
+    };
     let mut htimer = interval(c.monitoring.hyperliquid_interval_seconds);
     let mut etimer = interval(c.monitoring.robinhood_interval_seconds);
     let mut hrefresh = interval(c.monitoring.hyperliquid_refresh_seconds);
@@ -185,8 +219,10 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                 }},
                 _=htimer.tick()=>{
                     let paper = if c.mode==Mode::Paper {store.read::<Paper>("paper.json")?} else {None};
+                    let residual = if c.mode==Mode::Live {store.read::<Value>("hedge_residual.json")?} else {None};
                     let report=json!({"time_ms":crate::now_ms(),"mode":c.mode,"max_data_age_seconds":c.strategy.max_data_age_seconds,"ws":hh,"prices":prices,"account":account,"collateral":account["state"]["lpMakerCollateral"],"account_ws":account_ws,
                         "account_configured":hl.user().is_ok(),"account_age_ms":account["observed_ms"].as_u64().map(|t|crate::now_ms().saturating_sub(t)),"ws_data_age_ms":hh.last_data_ms.map(|t|crate::now_ms().saturating_sub(t)),"refresh_pending":hbusy,"last_refresh_error":herr,
+                        "hedge_residual":residual,
                         "paper_position":paper.map(|p|json!({"coin":c.hyperliquid.hedge_coin,"short_base":p.portfolio.short_base,"equity":p.portfolio.hedge_equity,"pending_order":p.pending}))});
                     tracing::info!("\n{}",display::hyperliquid(&report));
                     tracing::debug!(report=%report,"Hyperliquid status raw snapshot");
@@ -212,8 +248,11 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                 _=erefresh.tick()=>{
                     if !ebusy {
                         ebusy=true;let cfg=c.clone();let v=venue.clone();let s=store.clone();
+                        let anchor=performance.positions.values().filter_map(|h|h.samples.back())
+                            .filter(|sample|crate::now_ms().saturating_sub(sample.time_ms)<=c.strategy.max_data_age_seconds*1000)
+                            .max_by_key(|sample|sample.block).map(|sample|(performance.identity.clone(),sample.block,sample.block_hash.clone()));
                         jobs.spawn(async move { Refresh::Robinhood(match tokio::time::timeout(Duration::from_secs(cfg.monitoring.refresh_timeout_seconds),
-                            refresh_chain(&cfg,&v,&s)).await {Ok(v)=>v,Err(e)=>Err(e.into())}) });
+                            refresh_chain(&cfg,&v,&s,anchor)).await {Ok(v)=>v,Err(e)=>Err(e.into())}) });
                     }
                     if !vbusy {
                         vbusy=true;let cfg=c.clone();let v=venue.clone();let mut vol=volume.clone();
@@ -227,7 +266,14 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                 r=jobs.join_next(), if !jobs.is_empty()=>{
                     match r.context("refresh task missing")?? {
                         Refresh::Hyperliquid(r)=>{hbusy=false;match r {Ok(v)=>{account=v;herr=None;},Err(e)=>{herr=Some(format!("{e:#}"));tracing::warn!(error=%e,"Hyperliquid account refresh failed; previous snapshot retained with its timestamp");}}},
-                        Refresh::Robinhood(r)=>{ebusy=false;match r {Ok(v)=>{chain=v;eerr=None;},Err(e)=>{eerr=Some(format!("{e:#}"));tracing::warn!(error=%e,"Robinhood refresh failed; previous snapshot retained with its timestamp");}}},
+                        Refresh::Robinhood(r)=>{ebusy=false;match r {Ok(mut v)=>{
+                            let mut next=performance.clone();
+                            match next.observe(&mut v,crate::now_ms(),c.strategy.max_data_age_seconds*1000,&holding_starts) {
+                                Ok(())=>{if store.is_writable() && c.mode==Mode::Live && v["positions_observed"]==true {store.write(performance::FILE,&next)?;}performance=next;},
+                                Err(e)=>{v["performance_error"]=json!(format!("{e:#}"));tracing::warn!(error=%e,"LP APR 计算暂停，等待有效快照");},
+                            }
+                            chain=v;eerr=None;
+                        },Err(e)=>{eerr=Some(format!("{e:#}"));tracing::warn!(error=%e,"Robinhood refresh failed; previous snapshot retained with its timestamp");}}},
                         Refresh::Volume(r)=>{vbusy=false;match r {Ok((v,vol))=>{volume_report=v;volume=vol;volume_error=None;if store.is_writable(){store.write("monitor_volume.json",&volume)?;}},Err(e)=>{volume_error=Some(format!("{e:#}"));tracing::warn!(error=%e,"volume refresh failed; LP price and position reporting continues");}}},
                     }
                 }
@@ -243,10 +289,17 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
     tracing::info!("monitor stopped; sockets and refresh tasks joined");
     result
 }
-async fn refresh_chain(c: &Config, venue: &UniswapV3, store: &Store) -> Result<Value> {
+async fn refresh_chain(
+    c: &Config,
+    venue: &UniswapV3,
+    store: &Store,
+    previous: Option<(Value, u64, String)>,
+) -> Result<Value> {
     let snapshot = venue.snapshot().await?;
     let phase = store.read::<Value>("strategy.json")?;
     let mut positions_observed = true;
+    let mut accounting_revisions = BTreeMap::new();
+    let mut accounting_identity = Value::Null;
     let (positions, pnl) = if c.mode == Mode::Paper {
         if let Some(mut p) = store.read::<Paper>("paper.json")? {
             for pos in &mut p.portfolio.positions {
@@ -273,7 +326,12 @@ async fn refresh_chain(c: &Config, venue: &UniswapV3, store: &Store) -> Result<V
                 .and_then(|v| v["owner"].as_str())
         });
         let positions = if let Some(owner) = owner {
-            let ids = venue.token_ids(owner.parse()?).await?;
+            accounting_identity = json!({"chain_id":c.liquidity.chain_id,"pool":c.liquidity.pool.to_ascii_lowercase(),
+                "manager":c.liquidity.position_manager.to_ascii_lowercase(),"owner":owner.to_ascii_lowercase(),
+                "base_decimals":c.liquidity.base_decimals,"quote_decimals":c.liquidity.quote_decimals});
+            let ids = venue
+                .token_ids_at(owner.parse()?, &format!("0x{:x}", snapshot.block))
+                .await?;
             let registered = store
                 .read::<BTreeMap<String, String>>("nfts.json")?
                 .unwrap_or_default();
@@ -288,7 +346,16 @@ async fn refresh_chain(c: &Config, venue: &UniswapV3, store: &Store) -> Result<V
                     (layer, id)
                 })
                 .collect::<Vec<_>>();
-            venue.positions(owner, &ids).await?
+            let observed = venue.position_observations(owner, &ids, &snapshot).await?;
+            observed
+                .into_iter()
+                .map(|(p, revision)| {
+                    if let Some(id) = &p.token_id {
+                        accounting_revisions.insert(id.clone(), revision);
+                    }
+                    p
+                })
+                .collect()
         } else {
             positions_observed = false;
             vec![]
@@ -304,9 +371,45 @@ async fn refresh_chain(c: &Config, venue: &UniswapV3, store: &Store) -> Result<V
         };
         (positions, pnl)
     };
+    let mut reports = positions_report(&positions, snapshot.price, c.mode == Mode::Paper);
+    let mut reorg = false;
+    if c.mode == Mode::Live && positions_observed {
+        if let Some((_, block, hash)) =
+            previous.filter(|(identity, _, _)| *identity == accounting_identity)
+        {
+            reorg = block > snapshot.block
+                || venue
+                    .rpc
+                    .request(
+                        "eth_getBlockByNumber",
+                        json!([format!("0x{block:x}"), false]),
+                    )
+                    .await?["hash"]
+                    != hash;
+        }
+        let canonical = venue
+            .rpc
+            .request(
+                "eth_getBlockByNumber",
+                json!([format!("0x{:x}", snapshot.block), false]),
+            )
+            .await?;
+        anyhow::ensure!(
+            canonical["hash"] == snapshot.block_hash,
+            "LP observation block changed during sampling"
+        );
+    }
+    for p in &mut reports {
+        if let Some(revision) = p["token_id"]
+            .as_str()
+            .and_then(|id| accounting_revisions.get(id))
+        {
+            p["accounting_revision"] = json!(revision);
+        }
+    }
     Ok(
-        json!({"observed_ms":crate::now_ms(),"pool":snapshot,"positions_observed":positions_observed,"positions":positions_report(&positions,snapshot.price,c.mode==Mode::Paper),
-        "returns":pnl,"strategy":phase}),
+        json!({"observed_ms":crate::now_ms(),"mode":c.mode,"pool":snapshot,"accounting_identity":accounting_identity,"accounting_reorg":reorg,
+        "positions_observed":positions_observed,"positions":reports,"returns":pnl,"strategy":phase}),
     )
 }
 
