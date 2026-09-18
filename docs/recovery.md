@@ -37,6 +37,8 @@
 
 自动撤销旧策略单只在已授权的 **live 配置 + `run --execute`** 下发生；`status`、`monitor` 和单独的 `reconcile` 不会执行这一撤单流程。未决的链上交易仍按原哈希等待，不自动加价或换 nonce。
 
+若显式运行过 `lp --execute retry-approval --hash <原哈希>`，`pending.json` 额外保存 `replacements` 中的已签名替换授权。原始 `hash` 和 nonce 不变，对账会检查原始及所有替换哈希，任一交易确认后才释放该 nonce。新旧交易使用同一 nonce、同一代币、spender、金额和 calldata；此入口仅支持 ERC20 授权，不能用于重放过期的 mint/swap。所有广播失败都保留 pending，包括明确的 RPC 费用拒绝；新版另保存 `last_broadcast_error`。操作步骤见 [EVM 费用与授权恢复](production.md#evm-费用与授权恢复)。
+
 `unknownOid`、接口错误或无法识别的新订单状态都不是“订单没有成交”的证明。即使原请求已经过期，也保留未决记录并阻止重复下单；需核对交易所历史和实际资产后处理。不能简单删除 `pending.json` 绕过。
 
 ## 查看与运行

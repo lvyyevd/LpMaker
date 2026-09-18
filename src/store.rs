@@ -8,6 +8,20 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub fn redact_signatures(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.remove("raw_transaction");
+            map.remove("signature");
+            for value in map.values_mut() {
+                redact_signatures(value);
+            }
+        }
+        Value::Array(values) => values.iter_mut().for_each(redact_signatures),
+        _ => {}
+    }
+}
+
 pub struct Store {
     root: PathBuf,
     _lock: Option<File>,

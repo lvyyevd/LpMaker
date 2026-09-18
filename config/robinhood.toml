@@ -43,6 +43,8 @@ confirmations = 12
 slippage_bps = 30
 deadline_seconds = 120
 max_gas_native = 0.003
+gas_fee_buffer_bps = 10000 # Fee cap: add 100% headroom; EIP-1559 does not pay the entire cap.
+gas_limit_buffer_bps = 2000 # Gas units: add 20%, rounded up.
 max_quote_age_seconds = 60
 
 [strategy]

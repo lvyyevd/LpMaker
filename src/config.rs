@@ -74,8 +74,20 @@ pub struct LiquidityConfig {
     pub slippage_bps: u32,
     pub deadline_seconds: u64,
     pub max_gas_native: f64,
+    /// Extra fee-cap headroom; 10_000 bps means 100% above the estimate.
+    #[serde(default = "default_gas_fee_buffer")]
+    pub gas_fee_buffer_bps: u32,
+    /// Extra gas units; 2_000 bps means 20% above eth_estimateGas.
+    #[serde(default = "default_gas_limit_buffer")]
+    pub gas_limit_buffer_bps: u32,
     #[serde(default = "default_quote_age")]
     pub max_quote_age_seconds: u64,
+}
+fn default_gas_fee_buffer() -> u32 {
+    10_000
+}
+fn default_gas_limit_buffer() -> u32 {
+    2_000
 }
 fn default_quote_age() -> u64 {
     60
@@ -227,6 +239,11 @@ impl Config {
         Ok(c)
     }
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            (1..=40_000).contains(&self.liquidity.gas_fee_buffer_bps)
+                && (1..=10_000).contains(&self.liquidity.gas_limit_buffer_bps),
+            "gas fee buffer must be 1..=40000 bps; gas limit buffer must be 1..=10000 bps"
+        );
         ensure!(
             self.runtime.read_retry_seconds > 0
                 && self.runtime.read_retry_seconds <= 300

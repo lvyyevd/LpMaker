@@ -204,6 +204,12 @@ enum TradeCommand {
 }
 #[derive(Subcommand)]
 enum LpCommand {
+    /// Recover only a pending ERC20 approval, with the same nonce/calldata and higher bounded fees.
+    RetryApproval {
+        /// Original transaction hash recorded in pending.json.
+        #[arg(long)]
+        hash: String,
+    },
     Mint {
         layer: String,
         #[arg(long)]
@@ -282,8 +288,7 @@ async fn main() -> Result<()> {
         Command::Status => {
             let mut pending = store.pending()?;
             if let Some(p) = pending.as_mut() {
-                if let Some(map) = p.as_object_mut() { map.remove("raw_transaction"); }
-                if let Some(map) = p["request"].as_object_mut() { map.remove("signature"); }
+                lp_maker::store::redact_signatures(p);
             }
             print(json!({"checkpoint":store.read::<Value>("checkpoint.json")?,
                 "strategy":store.read::<Value>("strategy.json")?,"paper":store.read::<Value>("paper.json")?,
@@ -514,6 +519,7 @@ async fn main() -> Result<()> {
             venue.validate().await?;
             let ex = Executor::new(venue, store.clone())?;
             let result = match command {
+                LpCommand::RetryApproval { hash } => ex.retry_approval(&hash).await?,
                 LpCommand::Mint {
                     layer,
                     value,

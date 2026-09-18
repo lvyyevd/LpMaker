@@ -1,6 +1,7 @@
 use super::{
     UniswapV3,
     abi::{IERC20, INfpm, IRouter02},
+    fees::Fees,
     raw_units,
     rpc::{address_word, hex_u64},
 };
@@ -10,8 +11,11 @@ use crate::{
     store::Store,
 };
 use alloy::{
-    consensus::{SignableTransaction, TxLegacy},
-    eips::eip2718::Encodable2718,
+    consensus::{
+        SignableTransaction, Transaction, TxEip1559, TxEnvelope, TxLegacy,
+        transaction::SignerRecoverable,
+    },
+    eips::eip2718::{Decodable2718, Encodable2718},
     primitives::{
         Address, Bytes, TxKind, U256,
         aliases::{I24, U24},
@@ -23,6 +27,9 @@ use alloy::{
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
+
+#[path = "approval_recovery.rs"]
+mod approval_recovery;
 
 pub struct Executor {
     pub venue: UniswapV3,
@@ -256,17 +263,38 @@ impl Executor {
         rpc.request("eth_call", json!([call, "latest"]))
             .await
             .context("transaction simulation reverted")?;
-        let gas = hex_u64(&rpc.request("eth_estimateGas", json!([call])).await?)?
-            .checked_mul(12)
-            .context("gas overflow")?
-            / 10;
-        let gas_price = hex_u64(&rpc.request("eth_gasPrice", json!([])).await?)?;
-        tracing::info!(nonce, gas, gas_price, operation=%operation, "EVM simulation and gas estimation completed");
+        let estimated_gas = hex_u64(&rpc.request("eth_estimateGas", json!([call])).await?)?;
+        let gas = u64::try_from(super::fees::buffered(
+            u128::from(estimated_gas),
+            self.venue.cfg.gas_limit_buffer_bps,
+        )?)
+        .context("buffered gas limit overflow")?;
+        let fees = Fees::estimate(rpc, self.venue.cfg.gas_fee_buffer_bps).await?;
+        tracing::info!(nonce, estimated_gas, gas, gas_limit_buffer_bps=self.venue.cfg.gas_limit_buffer_bps, fees=?fees, operation=%operation, "EVM simulation and buffered gas estimation completed");
+        self.check_gas_budget(gas, &fees).await?;
+        // Approval, simulation and gas RPCs can consume most of the quote lifetime.
+        if let Some(quote_time) = operation.get("quote_time_ms") {
+            crate::runtime::fresh(
+                quote_time.as_u64().context("invalid quote time")?,
+                crate::now_ms(),
+                self.venue.cfg.max_quote_age_seconds,
+            )?;
+        }
+        let raw = self.sign_transaction(nonce, gas, to, data, &fees)?;
+        let hash = format!("{:#x}", keccak256(&raw));
+        self.store.begin(json!({"venue":"evm","hash":hash,"nonce":nonce,"owner":self.owner(),"prepared_ms":crate::now_ms(),"operation":operation,"fees":fees,"raw_transaction":format!("0x{}",hex::encode(&raw))}))?;
+        self.nonce.prepared(nonce, &hash).await?;
+        self.broadcast(&hash, &raw, nonce).await?;
+        self.wait_receipt(&hash, &operation).await
+    }
+    async fn check_gas_budget(&self, gas: u64, fees: &Fees) -> Result<()> {
         ensure!(
-            (gas as f64) * (gas_price as f64) / 1e18 <= self.venue.cfg.max_gas_native,
+            (gas as f64) * (fees.max_fee_per_gas as f64) / 1e18 <= self.venue.cfg.max_gas_native,
             "transaction gas budget exceeded"
         );
-        let balance = rpc
+        let balance = self
+            .venue
+            .rpc
             .request("eth_getBalance", json!([self.owner(), "latest"]))
             .await?;
         let balance = U256::from_str_radix(
@@ -277,95 +305,131 @@ impl Executor {
             16,
         )?;
         ensure!(
-            balance >= U256::from(gas) * U256::from(gas_price),
+            balance >= U256::from(gas) * U256::from(fees.max_fee_per_gas),
             "insufficient native ETH for gas"
         );
-        // Approval, simulation and gas RPCs can consume most of the quote lifetime.
-        if let Some(quote_time) = operation.get("quote_time_ms") {
-            crate::runtime::fresh(
-                quote_time.as_u64().context("invalid quote time")?,
-                crate::now_ms(),
-                self.venue.cfg.max_quote_age_seconds,
-            )?;
+        Ok(())
+    }
+    fn sign_transaction(
+        &self,
+        nonce: u64,
+        gas: u64,
+        to: Address,
+        data: Vec<u8>,
+        fees: &Fees,
+    ) -> Result<Vec<u8>> {
+        if let Some(tip) = fees.max_priority_fee_per_gas {
+            let tx = TxEip1559 {
+                chain_id: self.venue.cfg.chain_id,
+                nonce,
+                gas_limit: gas,
+                max_fee_per_gas: fees.max_fee_per_gas,
+                max_priority_fee_per_gas: tip,
+                to: TxKind::Call(to),
+                value: U256::ZERO,
+                input: Bytes::from(data),
+                access_list: Default::default(),
+            };
+            let sig = self.signer.sign_hash_sync(&tx.signature_hash())?;
+            return Ok(tx.into_signed(sig).encoded_2718());
         }
         let tx = TxLegacy {
             chain_id: Some(self.venue.cfg.chain_id),
             nonce,
-            gas_price: gas_price as u128,
+            gas_price: fees.max_fee_per_gas,
             gas_limit: gas,
             to: TxKind::Call(to),
             value: U256::ZERO,
             input: Bytes::from(data),
         };
         let sig = self.signer.sign_hash_sync(&tx.signature_hash())?;
-        let raw = tx.into_signed(sig).encoded_2718();
-        let hash = keccak256(&raw);
-        self.store.begin(json!({"venue":"evm","hash":hash,"nonce":nonce,"owner":self.owner(),"prepared_ms":crate::now_ms(),"operation":operation,"raw_transaction":format!("0x{}",hex::encode(&raw))}))?;
-        self.nonce.prepared(nonce, &format!("{hash:#x}")).await?;
-        let sent = rpc
+        Ok(tx.into_signed(sig).encoded_2718())
+    }
+    async fn broadcast(&self, hash: &str, raw: &[u8], nonce: u64) -> Result<()> {
+        let result = self
+            .venue
+            .rpc
             .request(
                 "eth_sendRawTransaction",
                 json!([format!("0x{}", hex::encode(raw))]),
             )
-            .await
-            .context(
-                "broadcast result uncertain; reconcile stored hash, never resend with a new nonce",
-            )?;
+            .await;
+        let sent = match result {
+            Ok(value) => value,
+            Err(error) => {
+                let mut pending = self.store.pending()?.context("missing broadcast intent")?;
+                let details = json!({"hash":hash,"nonce":nonce,"time_ms":crate::now_ms(),"rpc_rejection":error.is::<super::rpc::RpcError>(),"error":format!("{error:#}")});
+                pending["last_broadcast_error"] = details.clone();
+                self.store.write("pending.json", &pending)?;
+                self.store.event("evm_broadcast_error", &details)?;
+                return Err(error).context("broadcast not confirmed; pending retained, reconcile before retrying; never resend with a new nonce");
+            }
+        };
         ensure!(
-            sent.as_str()
-                .is_some_and(|s| s.eq_ignore_ascii_case(&format!("{hash:#x}"))),
+            sent.as_str().is_some_and(|s| s.eq_ignore_ascii_case(hash)),
             "RPC returned unexpected transaction hash"
         );
-        self.store.event(
-            "evm_broadcast",
-            json!({"hash":hash,"nonce":nonce,"operation":operation}),
-        )?;
+        self.store
+            .event("evm_broadcast", json!({"hash":hash,"nonce":nonce}))?;
         tracing::info!(%hash, nonce, "EVM transaction broadcast acknowledged");
-        self.wait_receipt(&format!("{hash:#x}"), &operation).await
+        Ok(())
     }
     pub async fn wait_receipt(&self, hash: &str, operation: &Value) -> Result<Value> {
+        let hashes = if let Some(pending) = self.store.pending()? {
+            let hashes = self.validated_pending_hashes(&pending)?;
+            ensure!(
+                hashes.iter().any(|h| h.eq_ignore_ascii_case(hash)),
+                "pending hash mismatch"
+            );
+            hashes
+        } else {
+            vec![hash.to_string()]
+        };
         let mut refreshed = std::time::Instant::now();
         for _ in 0..90 {
             if refreshed.elapsed() >= Duration::from_secs(self.venue.cfg.nonce_refresh_seconds) {
                 self.nonce.refresh().await?;
                 refreshed = std::time::Instant::now();
             }
-            let r = self
-                .venue
-                .rpc
-                .request("eth_getTransactionReceipt", json!([hash]))
-                .await?;
-            if !r.is_null() {
-                ensure!(
-                    r["transactionHash"]
-                        .as_str()
-                        .is_some_and(|h| h.eq_ignore_ascii_case(hash)),
-                    "receipt hash mismatch; nonce remains unresolved"
-                );
-                let block = hex_u64(&r["blockNumber"])?;
-                tracing::debug!(
-                    hash,
-                    block,
-                    "EVM receipt observed; waiting for confirmations"
-                );
-                if self.venue.rpc.block_number().await? >= block + self.venue.cfg.confirmations {
-                    let canonical = self
-                        .venue
-                        .rpc
-                        .request("eth_getBlockByNumber", json!([r["blockNumber"], false]))
-                        .await?;
+            for hash in &hashes {
+                let r = self
+                    .venue
+                    .rpc
+                    .request("eth_getTransactionReceipt", json!([hash]))
+                    .await?;
+                if !r.is_null() {
                     ensure!(
-                        canonical["hash"] == r["blockHash"],
-                        "receipt reorged; reconcile required"
+                        r["transactionHash"]
+                            .as_str()
+                            .is_some_and(|h| h.eq_ignore_ascii_case(hash)),
+                        "receipt hash mismatch; nonce remains unresolved"
                     );
-                    if hex_u64(&r["status"])? != 1 {
+                    let block = hex_u64(&r["blockNumber"])?;
+                    tracing::debug!(
+                        hash=%hash,
+                        block,
+                        "EVM receipt observed; waiting for confirmations"
+                    );
+                    if self.venue.rpc.block_number().await? >= block + self.venue.cfg.confirmations
+                    {
+                        let canonical = self
+                            .venue
+                            .rpc
+                            .request("eth_getBlockByNumber", json!([r["blockNumber"], false]))
+                            .await?;
+                        ensure!(
+                            canonical["hash"] == r["blockHash"],
+                            "receipt reorged; reconcile required"
+                        );
+                        if hex_u64(&r["status"])? != 1 {
+                            self.nonce.confirmed(hash, &r).await?;
+                            bail!("on-chain transaction reverted: {hash}")
+                        }
+                        self.record_receipt(&r, operation)?;
                         self.nonce.confirmed(hash, &r).await?;
-                        bail!("on-chain transaction reverted: {hash}")
+                        tracing::info!(hash=%hash, block, operation=%operation, "EVM operation confirmed");
+                        return Ok(r);
                     }
-                    self.record_receipt(&r, operation)?;
-                    self.nonce.confirmed(hash, &r).await?;
-                    tracing::info!(hash, block, operation=%operation, "EVM operation confirmed");
-                    return Ok(r);
                 }
             }
             tokio::time::sleep(Duration::from_secs(2)).await;

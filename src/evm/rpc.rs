@@ -11,6 +11,19 @@ use std::{
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
+#[derive(Debug)]
+pub struct RpcError {
+    pub method: String,
+    pub code: i64,
+    pub message: String,
+}
+impl std::fmt::Display for RpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RPC {} ({}): {}", self.method, self.code, self.message)
+    }
+}
+impl std::error::Error for RpcError {}
+
 #[derive(Clone)]
 pub struct Rpc {
     client: reqwest::Client,
@@ -64,8 +77,18 @@ impl Rpc {
                     continue;
                 }
             };
-            ensure!(v.get("error").is_none(), "RPC {method}: {}", v["error"]);
             ensure!(v["id"] == id, "RPC response id mismatch");
+            if let Some(error) = v.get("error").filter(|e| !e.is_null()) {
+                return Err(RpcError {
+                    method: method.into(),
+                    code: error["code"].as_i64().context("invalid RPC error code")?,
+                    message: error["message"]
+                        .as_str()
+                        .context("invalid RPC error message")?
+                        .into(),
+                }
+                .into());
+            }
             tracing::debug!(
                 method,
                 id,

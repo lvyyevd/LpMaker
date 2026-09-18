@@ -47,6 +47,8 @@ confirmations = 12
 slippage_bps = 30
 deadline_seconds = 120
 max_gas_native = 0.003
+gas_fee_buffer_bps = 10000 # Extra 100% fee-cap headroom
+gas_limit_buffer_bps = 2000 # Extra 20% gas units
 
 [strategy]
 total_capital = 200.0

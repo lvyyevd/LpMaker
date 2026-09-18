@@ -1,12 +1,32 @@
 //! Serial nonce lifecycle. Pending/unknown transactions are never replaced automatically.
 use super::rpc::{Rpc, hex_u64};
 use crate::store::Store;
-use alloy::primitives::Address;
+use alloy::primitives::{Address, B256};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+/// The root hash remains the operation identity; fee replacements share its nonce.
+pub fn hashes(pending: &Value) -> Result<Vec<String>> {
+    let mut values = vec![pending["hash"].as_str().context("pending hash")?];
+    if let Some(replacements) = pending.get("replacements") {
+        for tx in replacements.as_array().context("invalid replacements")? {
+            values.push(tx["hash"].as_str().context("replacement hash")?);
+        }
+    }
+    let mut out = Vec::new();
+    for value in values {
+        let hash = format!("{:#x}", value.parse::<B256>()?);
+        ensure!(
+            !out.contains(&hash),
+            "duplicate transaction hash in pending state"
+        );
+        out.push(hash);
+    }
+    Ok(out)
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct NonceState {
@@ -171,7 +191,17 @@ impl NonceManager {
         let _guard = self.lock.lock().await;
         let mut state = self.load()?;
         if let Some(op) = &state.inflight {
-            ensure!(op["hash"] == hash, "receipt does not match reserved nonce");
+            let pending = self.store.pending()?.context("missing pending operation")?;
+            ensure!(
+                pending["hash"] == op["hash"] && pending["nonce"] == op["nonce"],
+                "reserved operation mismatch"
+            );
+            ensure!(
+                hashes(&pending)?
+                    .iter()
+                    .any(|h| h.eq_ignore_ascii_case(hash)),
+                "receipt does not match reserved nonce"
+            );
         }
         state.inflight = None;
         self.store.write("evm_nonce.json", &state)?;

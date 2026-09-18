@@ -1037,8 +1037,8 @@ impl Drop for NonceWorker {
         tracing::info!("periodic nonce worker stopped");
     }
 }
-/// Transport/observability changes do not reset positions or accounting. Economic
-/// parameters and signer-account identity still require explicit state migration.
+/// Transport, observability and fee-quote buffers do not reset positions or accounting.
+/// Economic budgets (including the gas ceiling) and signer identity still require migration.
 pub fn transport_independent_fingerprint(serialized: &str) -> Result<Value> {
     let mut value: Value = serde_json::from_str(serialized)?;
     for (section, keys) in [
@@ -1052,6 +1052,8 @@ pub fn transport_independent_fingerprint(serialized: &str) -> Result<Value> {
                 "pending_warn_seconds",
                 "owner",
                 "max_quote_age_seconds",
+                "gas_fee_buffer_bps",
+                "gas_limit_buffer_bps",
             ],
         ),
         ("hyperliquid", vec!["http_url", "ws_url"]),

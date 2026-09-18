@@ -45,6 +45,41 @@ min_free_bytes = 268435456
 
 订单归档不自动删除，用于审计及阻止编号复用。默认容量达 80% 时记录警告，达到 256 MiB 上限时阻止归档并停止策略；应保留历史、增加容量或迁移完整状态目录。不要在线修改归档文件。磁盘可用空间低于 256 MiB 时不准备新交易，已有结果的记录和对账仍可使用预留空间。
 
+## EVM 费用与授权恢复
+
+新版读取最新区块 `baseFeePerGas` 和节点建议费用，预留比例在 `[liquidity]` 配置：
+
+```toml
+gas_fee_buffer_bps = 10000   # 费用上限额外预留 100%，即估算值的 2 倍
+gas_limit_buffer_bps = 2000 # gas 用量额外预留 20%，即估算值的 1.2 倍
+```
+
+`100 bps = 1%`。费用预留允许 1–40000 bps，用量预留允许 1–10000 bps，均不能为零。旧配置缺少字段时使用上述默认值。调整预留比例不会重置现有仓位、pending 或策略阶段；单笔费用预算 `max_gas_native` 仍属于需核对的经济参数。
+
+设 `m = 1 + gas_fee_buffer_bps / 10000`。支持 EIP-1559 的链发送 type-2 交易，费用上限为 `max(ceil(m × baseFee) + priorityFee, ceil(m × gasPrice))`。零 priority fee 合法；仅在节点明确不支持 priority-fee RPC 时，由 gasPrice 和 baseFee 推导。其他查询错误阻止发送。无 base fee 的旧链发送 legacy 交易，gasPrice 为 `ceil(m × 节点建议值)`。
+
+新交易的 gas limit 为 `ceil(eth_estimateGas × (1 + gas_limit_buffer_bps / 10000))`，向上取整保证小额估算也包含余量。日志记录原始 gas 估算、两种预留比例、最终 gas limit 和费用上限。同 nonce 授权恢复使用当前配置计算新的费用上限，gas limit 保持原交易值，并重新检查其能否覆盖当前模拟用量。
+
+EIP-1559 的上限留出涨价空间，实际费用取决于成交区块的基础费和小费，并非一定支付整个上限。Legacy 交易则实际使用所填 gasPrice。两种路径都按 gas limit × 费用上限检查 `max_gas_native` 和钱包 ETH 余额；余额或预算不足，在签名、记录 intent 和广播前停止。费用余量不能保证任意突发上涨时都成功，也不包括所有 L2 的额外费用模型。
+
+旧版直接将一次 `eth_gasPrice` 结果用于 legacy 交易，在广播前基础费略微上涨就可能出现 `max fee per gas less than block base fee`。失败授权的 pending 不能删除，也不能换新 nonce 重做。
+
+确认旧运行进程已停止，备份完整状态目录，更新代码并重新编译。在原配置、原 state_dir 下，加载本机私钥环境变量后显式执行：
+
+```bash
+cargo build --release --locked
+# 会签名并发送授权恢复交易；填 pending.json 中的原始 hash。
+./target/release/lp-maker --config config/local.toml lp --execute retry-approval --hash <原始交易哈希>
+```
+
+命令首先验证保存的签名、哈希、钱包、链、nonce、代币、spender、金额和 calldata；检查所有历史哈希的回执和钱包 nonce。若之前的交易已经确认，只对账；若 nonce 被未知交易占用或消费，保留 pending 并停止。确需发送时，仅在同一个 nonce 上提高费用，保留原授权内容和 gas limit，重新模拟并核对费用预算。新上限和小费至少比上一尝试提高 25%（加 1 wei 处理舍入），仍可能被节点的替换规则拒绝。最多允许八次显式替换，不自动循环加价。
+
+原始和替换交易都先持久化再广播；广播结果丢失、节点拒绝或进程崩溃不释放 nonce。`reconcile` 以及下一次 `run --execute` 会检查全部候选哈希。授权恢复确认后，再运行原来的策略命令；已有 LP 工作流继续按原恢复规则对账、退出并冷却，不直接重做旧建仓。该恢复命令本身只处理授权。
+
+费用修复和可配置预留新增 15 项本地回归测试，完整 102 项测试及 fmt / Clippy 均通过。覆盖原日志费用上涨、旧版 legacy 授权恢复、重复费用拒绝、广播响应丢失后重启、原交易抢先确认、nonce 状态写入中断、未知外部 nonce、预算限制和损坏签名拒绝对账；也验证预留比例确实进入签名、整数向上取整、旧配置默认值及状态绑定兼容。签名使用公开固定测试向量，交易请求仅发送到本地 mock RPC；没有使用真实账户签名或广播。
+
+依据：[EIP-1559 费用定义](https://eips.ethereum.org/EIPS/eip-1559)。
+
 ## 健康检查与进程管理
 
 ```bash

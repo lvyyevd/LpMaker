@@ -1,5 +1,6 @@
 pub mod abi;
 pub mod events;
+pub mod fees;
 pub mod nonce;
 pub mod rpc;
 pub mod tx;

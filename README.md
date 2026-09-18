@@ -6,6 +6,8 @@ Rust 浓缩流动性管理与永续合约对冲项目。当前接入 **Robinhood
 
 账户授权验证、只读故障恢复、小额补单、日志容量管理及健康检查见 [运行可靠性与验收](docs/production.md)。回归测试仍不等于已完成长期实盘验收。
 
+遇到 `max fee per gas less than block base fee` 的遗留授权，使用 [EVM 费用与授权恢复](docs/production.md#evm-费用与授权恢复) 中的显式恢复命令；保留原状态目录和 pending，新版支持动态费用及同 nonce 授权恢复。
+
 ## 快速运行
 
 ```bash
