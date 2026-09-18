@@ -222,6 +222,7 @@ async fn evm_ws_maps_subscription_ids_and_handles_ping() {
 #[derive(Default)]
 struct MockChain {
     transactions: Mutex<Vec<(u64, String)>>,
+    logs: Mutex<Vec<Value>>,
     lose_response: AtomicBool,
     mined: AtomicBool,
     revert: AtomicBool,
@@ -284,7 +285,7 @@ async fn rpc_server() -> (String, Arc<MockChain>, tokio::task::JoinHandle<()>) {
                             .iter()
                             .any(|(_, h)| *h == req["params"][0]);
                         if found && state.mined.load(Ordering::SeqCst) {
-                            json!({"transactionHash":req["params"][0],"blockNumber":"0x1","blockHash":"0xcanonical","status":if state.revert.load(Ordering::SeqCst){"0x0"}else{"0x1"},"gasUsed":"0x5208","effectiveGasPrice":"0x1","logs":[]})
+                            json!({"transactionHash":req["params"][0],"blockNumber":"0x1","blockHash":"0xcanonical","status":if state.revert.load(Ordering::SeqCst){"0x0"}else{"0x1"},"gasUsed":"0x5208","effectiveGasPrice":"0x1","logs":*state.logs.lock().unwrap()})
                         } else {
                             Value::Null
                         }
@@ -309,6 +310,73 @@ fn executor(url: String, store: Arc<Store>) -> Executor {
     // Public deterministic test vector; never a user key, never sent to a real network.
     let signer = PrivateKeySigner::from_bytes(&B256::from([1u8; 32])).unwrap();
     Executor::with_signer(UniswapV3::new(c.liquidity).unwrap(), store, signer).unwrap()
+}
+#[tokio::test]
+async fn reconciled_mint_consumes_first_entry_before_checkpoint_and_burn_keeps_history() {
+    let (url, state, server) = rpc_server().await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let ex = executor(url, store.clone());
+    let c = config();
+    lp_maker::recovery::save(
+        &store,
+        &c,
+        &lp_maker::strategy::Strategy::default(),
+        &lp_maker::engine::Paper::new(&c),
+    )
+    .unwrap();
+    let operation = json!({"kind":"mint","layer":"core"});
+    state.revert.store(true, Ordering::SeqCst);
+    assert!(
+        ex.send(ex.venue.manager, vec![1], operation.clone())
+            .await
+            .is_err()
+    );
+    assert!(store.read::<Value>("lp_history.json").unwrap().is_none());
+    state.revert.store(false, Ordering::SeqCst);
+    *state.logs.lock().unwrap() = vec![json!({"address":ex.venue.cfg.position_manager,"topics":[
+        format!("{:#x}",keccak256("Transfer(address,address,uint256)")),
+        format!("0x{:064x}",0), format!("0x{:0>64}",hex::encode(ex.owner())), format!("0x{:064x}",42)
+    ]})];
+    state.lose_response.store(true, Ordering::SeqCst);
+    assert!(
+        ex.send(ex.venue.manager, vec![1], operation.clone())
+            .await
+            .is_err()
+    );
+    assert!(store.pending().unwrap().is_some());
+    assert!(store.read::<Value>("lp_history.json").unwrap().is_none());
+    let hash = store.pending().unwrap().unwrap()["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    ex.wait_receipt(&hash, &operation).await.unwrap();
+    assert!(store.pending().unwrap().is_none());
+    assert_eq!(
+        store.read::<Value>("lp_history.json").unwrap().unwrap()["evidence"]["token_id"],
+        "42"
+    );
+    assert_eq!(
+        store.read::<Value>("nfts.json").unwrap().unwrap()["core"],
+        "42"
+    );
+    // The checkpoint is deliberately still the original Initial/Warmup checkpoint.
+    ex.send(
+        ex.venue.manager,
+        vec![2],
+        json!({"kind":"burn","layer":"core"}),
+    )
+    .await
+    .unwrap();
+    assert!(ex.ids().unwrap().is_empty());
+    assert_eq!(
+        lp_maker::recovery::load(&store, &c)
+            .unwrap()
+            .0
+            .entry_history,
+        lp_maker::strategy::EntryHistory::Established
+    );
+    server.abort();
 }
 #[tokio::test]
 async fn signed_transactions_allocate_unique_nonces_and_survive_restart() {

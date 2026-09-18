@@ -12,6 +12,10 @@ pub fn subscriptions(coins: &[String], user: Option<&str>) -> Vec<Value> {
         out.push(json!({"type":"candle","coin":c,"interval":"1h"}));
     }
     if let Some(u) = user {
+        out.push(json!({"type":"spotState","user":u}));
+        for coin in coins {
+            out.push(json!({"type":"activeAssetData","user":u,"coin":coin}));
+        }
         for t in [
             "orderUpdates",
             "userFills",

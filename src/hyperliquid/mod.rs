@@ -1,3 +1,4 @@
+pub mod account;
 pub mod auth;
 pub mod journal;
 pub mod orders;
@@ -412,8 +413,7 @@ impl HedgeVenue for Client {
         Ok(((b + a) / 2.0, t))
     }
     async fn account(&self) -> Result<Value> {
-        self.info(json!({"type":"clearinghouseState","user":self.user()?}))
-            .await
+        self.collateral_account().await
     }
     #[tracing::instrument(skip(self), fields(operation = "perp_order"))]
     async fn order(

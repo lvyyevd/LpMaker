@@ -469,6 +469,10 @@ impl Executor {
                 op["layer"].as_str().context("mint layer")?.into(),
                 id.to_string(),
             );
+            crate::recovery::record_lp_history(
+                &self.store,
+                json!({"source":"confirmed_mint","token_id":id.to_string(),"hash":r["transactionHash"]}),
+            )?;
         } else if op["kind"] == "burn" {
             ids.remove(op["layer"].as_str().context("burn layer")?);
         }

@@ -38,6 +38,9 @@ enum Command {
         once: bool,
         #[arg(long)]
         execute: bool,
+        /// Assert that a legacy flat account has never opened LP; does not bypass risk checks.
+        #[arg(long)]
+        first_entry: bool,
     },
     /// Stream public prices/book/trades/candles; optionally account events.
     Watch {
@@ -284,7 +287,7 @@ async fn main() -> Result<()> {
         Command::Check => unreachable!(),
         Command::Health { max_age_seconds } => print(lp_maker::runtime::check_health(&store, max_age_seconds)?),
         Command::Monitor { seconds } => lp_maker::monitor::standalone(c, store, seconds).await,
-        Command::Run { once, execute } => engine::run(c, store, once, execute).await,
+        Command::Run { once, execute, first_entry } => engine::run(c, store, once, execute, first_entry).await,
         Command::Status => {
             let mut pending = store.pending()?;
             if let Some(p) = pending.as_mut() {
@@ -367,15 +370,19 @@ async fn main() -> Result<()> {
             report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut latest_prices = Value::Null;
             let mut latest_positions = Value::Null;
+            let mut latest_spot = Value::Null;
+            let mut latest_capacity = json!({});
             loop {
                 tokio::select! {
                     e=rx.recv()=>match e{Some(e)=>{
                         if e.channel=="allMids" { latest_prices=json!({"observed_ms":e.received_ms,"mids":e.data["mids"]}); }
                         if e.channel=="clearinghouseState" { latest_positions=json!({"observed_ms":e.received_ms,"data":e.data}); }
-                        if e.channel=="connected" || e.channel=="disconnected" {latest_prices=Value::Null;latest_positions=Value::Null;}
+                        if e.channel=="spotState" {latest_spot=json!({"observed_ms":e.received_ms,"data":e.data});}
+                        if e.channel=="activeAssetData" {let coin=e.data["coin"].as_str().unwrap_or("unknown").to_string();latest_capacity[coin]=json!({"observed_ms":e.received_ms,"data":e.data});}
+                        if e.channel=="connected" || e.channel=="disconnected" {latest_prices=Value::Null;latest_positions=Value::Null;latest_spot=Value::Null;latest_capacity=json!({});}
                         println!("{}",serde_json::to_string(&e)?);
                     },None=>break},
-                    _=report_tick.tick()=>tracing::info!(prices=%latest_prices,positions=%latest_positions,"Hyperliquid status"),
+                    _=report_tick.tick()=>tracing::info!(prices=%latest_prices,positions=%latest_positions,spot_state=%latest_spot,available_to_trade=%latest_capacity,"Hyperliquid status"),
                     _=&mut end=>break,_=lp_maker::runtime::shutdown()=>break
                 }
             }
@@ -550,6 +557,7 @@ async fn main() -> Result<()> {
                             &[(layer.clone(), token_id.clone())],
                         )
                         .await?;
+                    lp_maker::recovery::record_lp_history(&store, json!({"source":"import","token_id":token_id}))?;
                     ids.insert(layer, token_id);
                     store.write("nfts.json", &ids)?;
                     json!({"status":"imported","nfts":ids})

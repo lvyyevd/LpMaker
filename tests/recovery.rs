@@ -10,7 +10,7 @@ use lp_maker::{
     },
     recovery,
     store::Store,
-    strategy::{Phase, Strategy},
+    strategy::{EntryHistory, Phase, Strategy},
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -42,6 +42,181 @@ fn prepared(store: &Store, managed: bool) {
     journal::prepare(store, &action(), USER, 1000).unwrap();
 }
 
+#[test]
+fn unified_accounting_correction_is_not_recorded_as_trading_profit() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(dir.path()).unwrap();
+    s.write("equity_baseline.json", &308.819245).unwrap();
+    assert_eq!(
+        recovery::equity_baseline(&s, 388.419245, "unified_usdc_v1").unwrap(),
+        (308.819245, false)
+    );
+    assert_eq!(
+        s.read::<f64>("equity_baseline.json").unwrap(),
+        Some(308.819245)
+    );
+    assert!(
+        s.read::<String>("equity_baseline_basis.json")
+            .unwrap()
+            .is_none()
+    );
+    // Legacy native-perp accounting is unchanged and remains comparable.
+    assert!(
+        recovery::equity_baseline(&s, 308.819245, "native_perps_v1")
+            .unwrap()
+            .1
+    );
+}
+#[test]
+fn new_equity_baseline_tracks_mode_across_restart_and_mode_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let s = Store::open(dir.path()).unwrap();
+        assert_eq!(
+            recovery::equity_baseline(&s, 200.0, "unified_usdc_v1").unwrap(),
+            (200.0, true)
+        );
+    }
+    let s = Store::open(dir.path()).unwrap();
+    assert_eq!(
+        recovery::equity_baseline(&s, 205.0, "unified_usdc_v1").unwrap(),
+        (200.0, true)
+    );
+    assert_eq!(
+        recovery::equity_baseline(&s, 125.0, "native_perps_v1").unwrap(),
+        (200.0, false)
+    );
+}
+#[test]
+fn legacy_paused_checkpoint_requires_explicit_first_entry_confirmation() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(dir.path()).unwrap();
+    let c = config();
+    let paper = Paper::new(&c);
+    let old = Strategy {
+        phase: Phase::Paused,
+        pause_since: 1234,
+        peak_equity: 205.0,
+        ..Default::default()
+    };
+    recovery::save(&s, &c, &old, &paper).unwrap();
+    let mut cp = s.read::<Value>("checkpoint.json").unwrap().unwrap();
+    cp["strategy"]
+        .as_object_mut()
+        .unwrap()
+        .remove("entry_history");
+    s.write("checkpoint.json", &cp).unwrap();
+    let (mut strategy, paper) = recovery::load(&s, &c).unwrap();
+    assert_eq!(strategy.entry_history, EntryHistory::LegacyUnknown);
+    assert_eq!(strategy.pause_since, 1234);
+    assert!(recovery::confirm_first_entry(&s, &mut strategy, &paper.portfolio).unwrap());
+    assert_eq!(strategy.entry_history, EntryHistory::Initial);
+    assert_eq!(strategy.peak_equity, 205.0);
+    recovery::save(&s, &c, &strategy, &paper).unwrap();
+    assert_eq!(
+        recovery::load(&s, &c).unwrap().0.entry_history,
+        EntryHistory::Initial
+    );
+}
+#[test]
+fn first_entry_confirmation_rejects_unresolved_workflow_and_nonflat_inventory() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(dir.path()).unwrap();
+    let p = Paper::new(&config()).portfolio;
+    let mut strategy = Strategy {
+        entry_history: EntryHistory::LegacyUnknown,
+        phase: Phase::Paused,
+        ..Default::default()
+    };
+    s.begin(json!({"venue":"evm","hash":"unresolved"})).unwrap();
+    assert!(recovery::confirm_first_entry(&s, &mut strategy, &p).is_err());
+    // Clearing is only a fixture transition; production uses remote reconciliation.
+    s.write("pending.json", &Value::Null).unwrap();
+    s.write("workflow.json", &json!({"unfinished":true}))
+        .unwrap();
+    assert!(recovery::confirm_first_entry(&s, &mut strategy, &p).is_err());
+    s.write("workflow.json", &Value::Null).unwrap();
+    for (base, short) in [(0.001, 0.0), (0.0, 0.001), (f64::NAN, 0.0)] {
+        let mut exposed = p.clone();
+        exposed.wallet_base = base;
+        exposed.short_base = short;
+        assert!(recovery::confirm_first_entry(&s, &mut strategy, &exposed).is_err());
+    }
+    assert_eq!(strategy.entry_history, EntryHistory::LegacyUnknown);
+}
+#[test]
+fn failed_initial_workflow_keeps_exemption_but_partial_mint_consumes_it() {
+    let c = config();
+    for minted in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let s = Store::open(dir.path()).unwrap();
+            let strategy = Strategy {
+                phase: Phase::Active,
+                ..Default::default()
+            };
+            recovery::save(&s, &c, &strategy, &Paper::new(&c)).unwrap();
+            if minted {
+                recovery::record_lp_history(&s, json!({"source":"confirmed_mint","token_id":"42"}))
+                    .unwrap();
+            }
+        }
+        let s = Store::open(dir.path()).unwrap();
+        let (mut strategy, paper) = recovery::load(&s, &c).unwrap();
+        recovery::finish_workflow_recovery(&mut strategy);
+        assert_eq!(strategy.phase, Phase::Paused);
+        assert_eq!(
+            strategy.entry_history,
+            if minted {
+                EntryHistory::Established
+            } else {
+                EntryHistory::Initial
+            }
+        );
+        assert!(!recovery::confirm_first_entry(&s, &mut strategy, &paper.portfolio).unwrap());
+        recovery::save(&s, &c, &strategy, &paper).unwrap();
+        assert_eq!(
+            recovery::load(&s, &c).unwrap().0.entry_history,
+            strategy.entry_history
+        );
+    }
+}
+#[test]
+fn registered_nft_history_survives_empty_inventory_and_stale_checkpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(dir.path()).unwrap();
+    let c = config();
+    recovery::save(&s, &c, &Strategy::default(), &Paper::new(&c)).unwrap();
+    s.write("nfts.json", &json!({"core":"42"})).unwrap();
+    let (strategy, _) = recovery::load(&s, &c).unwrap();
+    assert_eq!(strategy.entry_history, EntryHistory::Established);
+    s.write("nfts.json", &json!({})).unwrap();
+    let (mut strategy, paper) = recovery::load(&s, &c).unwrap();
+    assert!(!recovery::confirm_first_entry(&s, &mut strategy, &paper.portfolio).unwrap());
+    assert_eq!(strategy.entry_history, EntryHistory::Established);
+    s.write("lp_history.json", &json!({"ever_opened":false}))
+        .unwrap();
+    assert!(recovery::load(&s, &c).is_err());
+}
+#[test]
+fn first_entry_flag_cannot_reset_halt_or_established_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(dir.path()).unwrap();
+    let p = Paper::new(&config()).portfolio;
+    let mut strategy = Strategy {
+        phase: Phase::Halted,
+        entry_history: EntryHistory::LegacyUnknown,
+        peak_equity: 500.0,
+        ..Default::default()
+    };
+    assert!(!recovery::confirm_first_entry(&s, &mut strategy, &p).unwrap());
+    assert_eq!(strategy.phase, Phase::Halted);
+    assert_eq!(strategy.peak_equity, 500.0);
+    strategy.phase = Phase::Paused;
+    strategy.observe_lp(true);
+    assert!(!recovery::confirm_first_entry(&s, &mut strategy, &p).unwrap());
+    assert_eq!(strategy.entry_history, EntryHistory::Established);
+}
 #[test]
 fn checkpoint_restores_balances_pending_order_and_phase_as_one_commit() {
     let dir = tempfile::tempdir().unwrap();
@@ -289,6 +464,7 @@ async fn info_server(
             let request: Value =
                 serde_json::from_slice(&buf[header_end..header_end + length]).unwrap();
             let response = match request["type"].as_str().unwrap() {
+                "userAbstraction" => json!("default"),
                 "orderStatus" => order_status.clone(),
                 "clearinghouseState" => account.clone(),
                 "openOrders" => json!([]),
@@ -384,7 +560,7 @@ async fn restart_filled_order_refreshes_actual_position_and_keeps_audit() {
         &json!({"portfolio":{"short_base":0.0}}),
     )
     .unwrap();
-    let account = json!({"assetPositions":[{"position":{"coin":"ETH","szi":"-0.02"}}],"marginSummary":{"accountValue":"59.1"}});
+    let account = json!({"assetPositions":[{"position":{"coin":"ETH","szi":"-0.02"}}],"marginSummary":{"accountValue":"59.1"},"withdrawable":"39.1"});
     let (url, requests, server) = info_server(status("filled", "0"), account).await;
     let mut c = config();
     c.mode = Mode::Live;

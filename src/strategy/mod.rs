@@ -14,6 +14,15 @@ pub enum Phase {
     Recovering,
     Halted,
 }
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryHistory {
+    Initial,
+    Established,
+    /// Older checkpoints cannot prove that this is the first LP entry.
+    #[default]
+    LegacyUnknown,
+}
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct LayerState {
     pub protected: bool,
@@ -22,6 +31,8 @@ pub struct LayerState {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Strategy {
+    #[serde(default)]
+    pub entry_history: EntryHistory,
     pub phase: Phase,
     pub peak_equity: f64,
     pub pause_since: u64,
@@ -35,6 +46,7 @@ pub struct Strategy {
 impl Default for Strategy {
     fn default() -> Self {
         Self {
+            entry_history: EntryHistory::Initial,
             phase: Phase::Warmup,
             peak_equity: 0.0,
             pause_since: 0,
@@ -48,7 +60,20 @@ impl Default for Strategy {
     }
 }
 impl Strategy {
+    pub fn observe_lp(&mut self, has_positions: bool) {
+        if has_positions {
+            self.entry_history = EntryHistory::Established;
+        }
+    }
     pub fn evaluate(&mut self, c: &StrategyConfig, f: &MarketFrame) -> Decision {
+        self.observe_lp(!f.portfolio.positions.is_empty());
+        if self.phase == Phase::Warmup
+            && self.entry_history != EntryHistory::Initial
+            && f.portfolio.positions.is_empty()
+        {
+            self.phase = Phase::Paused;
+            self.pause_since = f.now_ms;
+        }
         let mut d = Decision {
             state: format!("{:?}", self.phase),
             reasons: vec![],
@@ -149,10 +174,19 @@ impl Strategy {
             }
         }
         if self.phase == Phase::Paused {
+            // First entry uses the current-market gates above, as a fresh Warmup does.
+            // Stale data, drawdown, downtrend and volatility protection remain mandatory.
+            let initial_entry = self.entry_history == EntryHistory::Initial && !unsafe_market;
             let can_resume = !unsafe_market
                 && self.healthy_hours >= c.resume_healthy_hours
                 && f.now_ms.saturating_sub(self.pause_since) >= c.cooldown_hours * 3_600_000;
-            if can_resume {
+            if initial_entry {
+                self.phase = Phase::Active;
+                self.fraction = 1.0;
+                d.lp = LpIntent::Deploy { fraction: 1.0 };
+                d.reasons
+                    .push("initial_entry: cooldown and healthy-hour waiting waived".into());
+            } else if can_resume {
                 self.phase = Phase::Recovering;
                 self.fraction = c.recovery_fraction;
                 self.last_scale = f.now_ms;
@@ -160,6 +194,14 @@ impl Strategy {
                     fraction: self.fraction,
                 };
             } else {
+                let remaining_ms = (c.cooldown_hours * 3_600_000)
+                    .saturating_sub(f.now_ms.saturating_sub(self.pause_since));
+                d.reasons.push(format!(
+                    "resume_wait: cooldown_remaining_seconds={}, healthy_hours={}/{}",
+                    remaining_ms.div_ceil(1000),
+                    self.healthy_hours,
+                    c.resume_healthy_hours
+                ));
                 d.lp = LpIntent::ExitToQuote;
                 d.target_short_base = f.portfolio.base();
                 d.emergency = true;
@@ -171,6 +213,8 @@ impl Strategy {
             self.fraction = 1.0;
             if f.portfolio.positions.is_empty() {
                 d.lp = LpIntent::Deploy { fraction: 1.0 };
+                d.reasons
+                    .push("initial_entry: current-market checks passed".into());
             }
         } else if self.phase == Phase::Recovering
             && self.healthy_hours >= c.resume_healthy_hours

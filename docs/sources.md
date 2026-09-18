@@ -3,6 +3,9 @@
 实现时核对于 2026-09-17。代码读取的是运行时链上状态与交易所元数据，文档中的部署地址也需要启动校验。
 
 - [Hyperliquid 信息 API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint)
+- [账户模式](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/account-abstraction-modes)：2026-09-18 核对 unifiedAccount 的余额和冻结金额来自 spot state。
+- [现货账户余额](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/spot)
+- [永续账户与 activeAssetData](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/perpetuals)
 - [Hyperliquid 交易 API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint)
 - [Hyperliquid WebSocket](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket)
 - [订阅消息](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions)

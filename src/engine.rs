@@ -2,9 +2,10 @@ use crate::{
     config::{Config, Mode},
     domain::*,
     evm::{UniswapV3, tx::Executor},
-    hyperliquid::{Client, journal, num, orders, position_size},
+    hyperliquid::{Client, account::collateral, journal, num, orders, position_size},
     math, recovery,
     store::Store,
+    strategy::Strategy,
 };
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
@@ -369,6 +370,9 @@ impl Live {
     }
     pub async fn portfolio(&self) -> Result<Portfolio> {
         let positions = self.liquidity.current_positions().await?;
+        if !positions.is_empty() {
+            recovery::record_lp_history(&self.store, json!({"source":"reconciled_inventory"}))?;
+        }
         let (base, quote) = self.liquidity.wallet_balances().await?;
         let account = self.hl.account().await?;
         self.store.write(
@@ -395,7 +399,7 @@ impl Live {
             wallet_base: base,
             wallet_quote: quote,
             short_base: -signed,
-            hedge_equity: num(&account["marginSummary"]["accountValue"])?,
+            hedge_equity: collateral(&account)?.equity_usdc,
             reserve: self.cfg.strategy.reserve,
         };
         let previous = self.store.read::<Value>("live_inventory.json")?;
@@ -483,7 +487,9 @@ impl Live {
             {
                 return Err(HedgeBudgetUnavailable("hedge margin budget exceeded").into());
             }
-            if delta * mid / self.cfg.hyperliquid.leverage as f64 > num(&account["withdrawable"])? {
+            if delta * mid / self.cfg.hyperliquid.leverage as f64
+                > collateral(&account)?.available_short_usdc
+            {
                 return Err(HedgeBudgetUnavailable("insufficient free hedge collateral").into());
             }
         }
@@ -532,7 +538,7 @@ impl Live {
         self.store
             .write("hedge_order.json", &Option::<Value>::None)?;
         // Read exchange inventory after cancel acknowledgement; cancellation may race a fill.
-        let current = -position_size(&self.hl.account().await?, coin)?;
+        let current = -position_size(&self.hl.perp_account().await?, coin)?;
         let mut final_current = current;
         let remaining = target - current;
         if emergency && remaining.abs() * mid >= 0.01 {
@@ -574,7 +580,7 @@ impl Live {
                     )
                     .await?;
             }
-            let actual = -position_size(&self.hl.account().await?, coin)?;
+            let actual = -position_size(&self.hl.perp_account().await?, coin)?;
             final_current = actual;
             ensure!(
                 (target - actual).abs() * mid < self.cfg.strategy.hedge_deadband_usd.min(10.0),
@@ -623,6 +629,46 @@ impl Live {
         }
         Ok(())
     }
+    /// Before buying any base inventory, reserve capacity to hedge the whole new LP budget.
+    /// This is a preflight only: execution still rechecks margin before each hedge order.
+    pub(crate) async fn preflight_entry(&self, d: &Decision, portfolio: &Portfolio) -> Result<()> {
+        let LpIntent::Deploy { fraction } = d.lp else {
+            return Ok(());
+        };
+        if !portfolio.positions.is_empty() {
+            return Ok(());
+        }
+        ensure!(
+            fraction.is_finite() && fraction > 0.0 && fraction <= 1.0,
+            "invalid deployment fraction"
+        );
+        let required =
+            self.cfg.strategy.lp_budget * fraction / f64::from(self.cfg.hyperliquid.leverage) / 0.9;
+        let account = self.hl.account().await?;
+        let funds = collateral(&account)?;
+        let equity = funds.equity_usdc;
+        let available = funds.available_short_usdc;
+        ensure!(
+            equity.is_finite() && available.is_finite(),
+            "invalid hedge collateral observation"
+        );
+        if required > self.cfg.strategy.hedge_collateral
+            || required > equity
+            || required > available
+        {
+            tracing::warn!(
+                account_mode=%funds.account_mode,
+                collateral_source=%funds.source,
+                required_usdc = required,
+                available_usdc = available,
+                equity_usdc = equity,
+                configured_usdc = self.cfg.strategy.hedge_collateral,
+                "LP entry waiting for hedge collateral; no inventory purchased"
+            );
+            return Err(HedgeBudgetUnavailable("entry_waiting_hedge_collateral").into());
+        }
+        Ok(())
+    }
     pub async fn apply(&self, d: &Decision) -> Result<()> {
         if d.lp == LpIntent::Hold {
             return self
@@ -634,11 +680,12 @@ impl Live {
                 )
                 .await;
         }
+        let portfolio = self.portfolio().await?;
+        self.preflight_entry(d, &portfolio).await?;
         self.store.write(
             "workflow.json",
             &Some(json!({"decision":d,"started_ms":crate::now_ms()})),
         )?;
-        let portfolio = self.portfolio().await?;
         // Inventory is temporarily fully hedged during a multi-venue LP transition.
         if let Err(error) = self.hedge(portfolio.base(), true).await {
             if d.lp != LpIntent::ExitToQuote
@@ -757,7 +804,13 @@ impl Live {
     }
 }
 
-pub async fn run(c: Config, store: Arc<Store>, once: bool, execute: bool) -> Result<()> {
+pub async fn run(
+    c: Config,
+    store: Arc<Store>,
+    once: bool,
+    execute: bool,
+    first_entry: bool,
+) -> Result<()> {
     recovery::start(&store)?;
     crate::runtime::status(&store, "starting", json!({"pid":std::process::id()}))?;
     let mut supervisor = crate::monitor::Supervisor::start(c.clone(), store.clone());
@@ -766,7 +819,7 @@ pub async fn run(c: Config, store: Arc<Store>, once: bool, execute: bool) -> Res
         result = crate::runtime::retry_reads(&store, Duration::from_secs(c.runtime.read_retry_seconds), once, || async {
             recovery::start(&store)?;
             crate::runtime::status(&store, "recovering", json!({"action":"reconcile persisted state"}))?;
-            run_strategy(c.clone(), store.clone(), once, execute).await
+            run_strategy(c.clone(), store.clone(), once, execute, first_entry).await
         }) => result,
         result = task => {
             supervisor.task.take();
@@ -789,7 +842,13 @@ pub async fn run(c: Config, store: Arc<Store>, once: bool, execute: bool) -> Res
     )?;
     result.and(stopped)
 }
-async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -> Result<()> {
+async fn run_strategy(
+    c: Config,
+    store: Arc<Store>,
+    once: bool,
+    execute: bool,
+    first_entry: bool,
+) -> Result<()> {
     let fingerprint = serde_json::to_string(
         &json!({"mode":c.mode,"liquidity":c.liquidity,"strategy":c.strategy,"hyperliquid":c.hyperliquid}),
     )?;
@@ -836,6 +895,7 @@ async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -
         l.portfolio().await?;
         l.sync_orders(true).await?;
         let actual = l.portfolio().await?; // Include fills racing recovery cancellation.
+        strategy.observe_lp(!actual.positions.is_empty());
         recovery::stage(&store, "exchange_reconciled", json!({"portfolio":actual}))?;
         let layers = actual
             .positions
@@ -882,12 +942,25 @@ async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -
             recovery::finish_workflow_recovery(&mut strategy);
             recovery::save(&store, &c, &strategy, &paper)?;
         }
+        if first_entry {
+            let actual = l.portfolio().await?;
+            let confirmed = recovery::confirm_first_entry(&store, &mut strategy, &actual)?;
+            tracing::info!(confirmed, entry_history=?strategy.entry_history, "first-entry migration checked after account reconciliation");
+        }
         Some(l)
     } else {
         ensure!(
             store.pending()?.is_none(),
             "paper state has a live unresolved operation; refusing to ignore it"
         );
+        strategy.observe_lp(!paper.portfolio.positions.is_empty());
+        if first_entry {
+            ensure!(
+                paper.pending.is_none(),
+                "first entry requires no pending paper hedge order"
+            );
+            recovery::confirm_first_entry(&store, &mut strategy, &paper.portfolio)?;
+        }
         let layers = paper
             .portfolio
             .positions
@@ -907,7 +980,7 @@ async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -
     recovery::stage(
         &store,
         "ready",
-        json!({"phase":strategy.phase,"mode":c.mode}),
+        json!({"phase":strategy.phase,"mode":c.mode,"entry_history":strategy.entry_history}),
     )?;
     let mut history = vec![];
     let mut fetched_hour = 0;
@@ -970,14 +1043,20 @@ async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -
         let now = crate::now_ms();
         crate::runtime::fresh(pool.time_ms, now, c.strategy.max_data_age_seconds)?;
         crate::runtime::fresh(ht, now, c.strategy.max_data_age_seconds)?;
-        let baseline = match store.read::<f64>("equity_baseline.json")? {
-            Some(v) => v,
-            None => {
-                let v = portfolio.equity(pool.price);
-                store.write("equity_baseline.json", &v)?;
-                v
+        let basis = if live.is_some() {
+            let account = store
+                .read::<Value>("account_snapshot.json")?
+                .context("missing account observation")?;
+            if collateral(&account["account"])?.account_mode == "unifiedAccount" {
+                "unified_usdc_v1"
+            } else {
+                "native_perps_v1"
             }
+        } else {
+            "paper_v1"
         };
+        let (baseline, baseline_comparable) =
+            recovery::equity_baseline(&store, portfolio.equity(pool.price), basis)?;
         store.write(
             "portfolio.json",
             &crate::monitor::PortfolioObservation {
@@ -985,6 +1064,7 @@ async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -
                 mark_price: pool.price,
                 portfolio: portfolio.clone(),
                 baseline_equity: baseline,
+                baseline_comparable: Some(baseline_comparable),
             },
         )?;
         let frame = MarketFrame {
@@ -995,23 +1075,36 @@ async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -
             candles: history.clone(),
             portfolio,
         };
-        let d = strategy.evaluate(&c.strategy, &frame);
+        let previous = strategy.clone();
+        let mut d = strategy.evaluate(&c.strategy, &frame);
+        let mut entry_deferred = false;
+        if let Some(l) = &live
+            && let Err(error) = l.preflight_entry(&d, &frame.portfolio).await
+        {
+            if !error.is::<HedgeBudgetUnavailable>() {
+                return Err(error);
+            }
+            defer_entry(&mut strategy, &previous, &mut d, &frame.portfolio);
+            entry_deferred = d.lp == LpIntent::Hold;
+        }
         store.event("decision",json!({"decision":d,"pool":frame.pool,"equity":frame.portfolio.equity(frame.pool.price),"net_base":frame.portfolio.base()-frame.portfolio.short_base}))?;
-        tracing::info!(phase=%d.state,action=?d.lp,price=frame.pool.price,equity=frame.portfolio.equity(frame.pool.price),reasons=?d.reasons,"strategy decision");
+        tracing::info!(phase=%d.state,entry_history=?strategy.entry_history,action=?d.lp,price=frame.pool.price,equity=frame.portfolio.equity(frame.pool.price),reasons=?d.reasons,"strategy decision");
         if live.is_some() {
             recovery::save(&store, &c, &strategy, &paper)?;
         }
-        if !d
-            .reasons
-            .iter()
-            .any(|r| r.starts_with("stale_or_invalid_data"))
+        if !entry_deferred
+            && !d
+                .reasons
+                .iter()
+                .any(|r| r.starts_with("stale_or_invalid_data"))
         {
             if let Some(l) = &live {
                 l.apply(&d).await?;
                 l.sync_orders(false).await?;
-                l.portfolio().await?;
+                strategy.observe_lp(!l.portfolio().await?.positions.is_empty());
             } else {
                 paper.apply(&d, &c, frame.pool.price, hp, now)?;
+                strategy.observe_lp(!paper.portfolio.positions.is_empty());
                 recovery::save(&store, &c, &strategy, &paper)?;
                 store.event("paper_execution", json!({"decision":d,"portfolio":paper.portfolio,"pending_hedge":paper.pending,"hedge_fees":paper.hedge_fees,"swap_costs":paper.swap_costs}))?;
             }
@@ -1027,6 +1120,32 @@ async fn run_strategy(c: Config, store: Arc<Store>, once: bool, execute: bool) -
             return Ok(());
         }
         tokio::time::sleep(Duration::from_secs(c.poll_seconds)).await;
+    }
+}
+
+/// An unexecuted deployment must not advance Active/Recovering or consume its entry allowance.
+pub(crate) fn defer_entry(
+    strategy: &mut Strategy,
+    previous: &Strategy,
+    d: &mut Decision,
+    portfolio: &Portfolio,
+) {
+    strategy.phase = previous.phase.clone();
+    strategy.fraction = previous.fraction;
+    strategy.last_scale = previous.last_scale;
+    d.lp = LpIntent::Hold;
+    d.state = format!("{:?}", strategy.phase);
+    d.target_short_base = portfolio.short_base;
+    d.reasons.push(
+        "entry_waiting_hedge_collateral: deployment deferred before any swap or LP transaction"
+            .into(),
+    );
+    if portfolio.wallet_base.abs() > 1e-8 || portfolio.short_base.abs() > 1e-8 {
+        // Insufficient collateral blocks entry, not disposal of pre-existing exposure.
+        strategy.phase = crate::strategy::Phase::Paused;
+        d.state = "Paused".into();
+        d.lp = LpIntent::ExitToQuote;
+        d.emergency = true;
     }
 }
 

@@ -45,6 +45,33 @@ min_free_bytes = 268435456
 
 订单归档不自动删除，用于审计及阻止编号复用。默认容量达 80% 时记录警告，达到 256 MiB 上限时阻止归档并停止策略；应保留历史、增加容量或迁移完整状态目录。不要在线修改归档文件。磁盘可用空间低于 256 MiB 时不准备新交易，已有结果的记录和对账仍可使用预留空间。
 
+## 统一账户资金读取
+
+程序通过 `userAbstraction` 自动识别账户模式，每次资金快照前后核对模式，避免切换期间混用两个账户口径；不自动修改交易所账户模式，也不发起划转。
+
+| 模式 | 策略净值的 Hyperliquid 部分 | 新增空单可用保证金 |
+|---|---|---|
+| `disabled` / `default` / `dexAbstraction` | 原生 `clearinghouseState.marginSummary.accountValue` | 原生 `withdrawable` |
+| `unifiedAccount` | `spotClearinghouseState` 中 token 0、coin USDC 的 `total` | 对冲币种 `activeAssetData.availableToTrade[1]`，同时受 USDC `total - hold` 限制 |
+
+统一账户不再把原生永续接口的 0 当成实际资金为 0。保留原始响应，并额外提供 `lpMakerCollateral`，包括账户模式、来源、币种、USDC 权益和买卖两侧可用金额。共享账本只计一次；不再叠加传统永续 `accountValue` 或重复叠加仓位 PnL，不把 USDH、HYPE 等余额当成 USDC。当前仍面向专用原生永续对冲账户；HIP-3 和 `portfolioMargin` 的借贷、多资产估值不在支持范围，后者会明确报错。账户模式未知、切换中、必要数据缺失或数字无效时停止新增，不回退成零余额或猜测可用资金。
+
+建仓前资金检查、实际新增对冲单检查和持仓净值均使用此口径。配置的保证金预算仍限制头寸，账户里有 79.60 USDC 不会自动把策略保证金预算从 60 改为 79.60。短仓检查使用卖出方向的额度，不能拿买入方向的额度替代。
+
+原生 WS 增加 `spotState`、各监听币种的 `activeAssetData`。每 30 秒状态日志单独显示 `collateral`；原始 WS 事件保存在 `account_ws` 中，不能覆盖经过账户模式核对的 REST 资金快照。断线清空 WS 缓存，REST 失败保留旧观察时间与错误，不假装数据已刷新。
+
+修复会把原先漏计的统一账户 USDC 计入组合净值。为避免将余额修正显示成策略盈利，新建收益基准同时记录 `equity_baseline_basis.json`；旧基准或不同口径基准不被覆盖。统一账户旧基准无法比较时，日志标记 `accounting_basis_changed`，`equity_change_usd` 为 `null`。当前净值仍显示，风险高水位和暂停状态仍保留。
+
+只读核对，无需签名私钥：
+
+```bash
+./target/release/lp-maker --config config/local.toml info account
+```
+
+依据：[官方账户模式](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/account-abstraction-modes)、[现货余额接口](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/spot)、[永续账户与 activeAssetData](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/perpetuals)。
+
+2026-09-18 验证：126 项测试、fmt、Clippy 和 release 编译通过。本地 mock 覆盖统一账户余额、方向额度、冻结金额、标准账户、模式切换、缺失数据以及本地签名下单路径。新版 release 程序只读查询用户账户，识别到 `unifiedAccount`、USDC 权益 79.60、ETH 卖出侧可交易保证金 79.60；35 秒官方 WS 监听收到 `spotState` 和 `activeAssetData`，正常退出。没有读取真实私钥或发送真实交易、划转。
+
 ## EVM 费用与授权恢复
 
 新版读取最新区块 `baseFeePerGas` 和节点建议费用，预留比例在 `[liquidity]` 配置：
@@ -74,7 +101,7 @@ cargo build --release --locked
 
 命令首先验证保存的签名、哈希、钱包、链、nonce、代币、spender、金额和 calldata；检查所有历史哈希的回执和钱包 nonce。若之前的交易已经确认，只对账；若 nonce 被未知交易占用或消费，保留 pending 并停止。确需发送时，仅在同一个 nonce 上提高费用，保留原授权内容和 gas limit，重新模拟并核对费用预算。新上限和小费至少比上一尝试提高 25%（加 1 wei 处理舍入），仍可能被节点的替换规则拒绝。最多允许八次显式替换，不自动循环加价。
 
-原始和替换交易都先持久化再广播；广播结果丢失、节点拒绝或进程崩溃不释放 nonce。`reconcile` 以及下一次 `run --execute` 会检查全部候选哈希。授权恢复确认后，再运行原来的策略命令；已有 LP 工作流继续按原恢复规则对账、退出并冷却，不直接重做旧建仓。该恢复命令本身只处理授权。
+原始和替换交易都先持久化再广播；广播结果丢失、节点拒绝或进程崩溃不释放 nonce。`reconcile` 以及下一次 `run --execute` 会检查全部候选哈希。授权恢复确认后，再运行原来的策略命令；已有 LP 工作流继续按恢复规则对账、退出，不直接重做旧建仓。曾建立过 LP 的账户仍须冷却；首次建仓前的等待豁免及旧状态迁移见 [首次建仓与暂停恢复](recovery.md#首次建仓与暂停恢复)。该恢复命令本身只处理授权。
 
 费用修复和可配置预留新增 15 项本地回归测试，完整 102 项测试及 fmt / Clippy 均通过。覆盖原日志费用上涨、旧版 legacy 授权恢复、重复费用拒绝、广播响应丢失后重启、原交易抢先确认、nonce 状态写入中断、未知外部 nonce、预算限制和损坏签名拒绝对账；也验证预留比例确实进入签名、整数向上取整、旧配置默认值及状态绑定兼容。签名使用公开固定测试向量，交易请求仅发送到本地 mock RPC；没有使用真实账户签名或广播。
 

@@ -11,9 +11,11 @@
 | `checkpoint.json` | 版本化的权威检查点：策略阶段、净值峰值、暂停时间、风控计数；paper 模式同时保存余额、LP、空单、待成交限价单及模拟费用 |
 | `strategy.json` / `paper.json` | 检查点的兼容导出，供查看和监控；重启时从检查点修复，不覆盖权威检查点 |
 | `nfts.json` | LP 层名称到 NFT token ID 的映射；确认 mint/burn 后更新 |
+| `lp_history.json` | 曾建立过 LP 的持久证据；确认 mint、导入或核对到现有 LP 时记录，退出 LP 后仍保留 |
+| `equity_baseline_basis.json` | 新收益基准采用的账本口径；统一账户修复前的旧基准标记不可比，不将漏计余额的修正显示成盈利 |
 | `lp_inventory.json` | 最近启动核对的本地 NFT 与链上有效 NFT 清单及一致性 |
 | `live_inventory.json` | 最近核对的实际 LP、钱包余额、永续仓位和保证金，包含账户原始响应与观察时间 |
-| `account_snapshot.json` | 实际 Hyperliquid 账户原始快照；即使检测到不允许的多仓/其他币种仓位也保留观察结果 |
+| `account_snapshot.json` | Hyperliquid 原始快照及 `lpMakerCollateral` 资金口径；统一账户额外保留 spot 和 activeAssetData。即使检测到不允许的多仓/其他币种仓位也保留观察结果 |
 | `orders.json` | 按 Cloid 索引的订单台账：账户、原始方向/价格/数量/TIF、OID、是否为策略对冲单、准备时间、当前状态、查询时间和交易所响应 |
 | `open_orders.json` | 实际挂单列表和查询时间；手工/未知来源的订单也记录在这里 |
 | `hedge_order.json` | 当前对冲订单的目标、方向、价格、数量和 Cloid；兼容导入旧版只含目标和 Cloid 的记录 |
@@ -40,6 +42,25 @@
 若显式运行过 `lp --execute retry-approval --hash <原哈希>`，`pending.json` 额外保存 `replacements` 中的已签名替换授权。原始 `hash` 和 nonce 不变，对账会检查原始及所有替换哈希，任一交易确认后才释放该 nonce。新旧交易使用同一 nonce、同一代币、spender、金额和 calldata；此入口仅支持 ERC20 授权，不能用于重放过期的 mint/swap。所有广播失败都保留 pending，包括明确的 RPC 费用拒绝；新版另保存 `last_broadcast_error`。操作步骤见 [EVM 费用与授权恢复](production.md#evm-费用与授权恢复)。
 
 `unknownOid`、接口错误或无法识别的新订单状态都不是“订单没有成交”的证明。即使原请求已经过期，也保留未决记录并阻止重复下单；需核对交易所历史和实际资产后处理。不能简单删除 `pending.json` 绕过。
+
+## 首次建仓与暂停恢复
+
+`strategy.entry_history` 保存在检查点中：新状态为 `initial`；一旦确认过任意一层 LP，变为 `established`，以后即使退出、清空 LP 或重启，也不会重新获得首次豁免。确认 mint 时还独立写入 `lp_history.json`，避免 mint 成功而检查点尚未更新的崩溃窗口。
+
+- **首次建仓前**：允许跳过 6 小时冷却和累计 6 个新健康小时的等待，按完整 LP 预算建仓。首次授权、兑换等流程失败后，仍先核对 pending、挂单和实际余额，完成遗留工作流退出，再根据最新行情重新决策；不会直接重放旧 mint。
+- **曾建立过 LP 后**：任意一层成功也算已建仓。暂停恢复仍要求配置中的 `cooldown_hours = 6` 和 `resume_healthy_hours = 6`，随后按 25% 分批恢复。日志的 `resume_wait` 展示剩余冷却秒数和健康小时进度。
+- **始终保留**：快跌、单边下跌、波动突增、价差、历史 K 线不足、过期行情、未决交易和回撤停机限制。`Halted` 不因首次参数或重启而解除。
+
+旧版 `Paused` 检查点没有首次记录，仅凭当前空仓无法区分“从未建仓”和“已经平仓”。因此默认迁移为 `legacy_unknown` 并保留冷却。**确认该状态目录从未成功建立过 LP** 时，可使用一次迁移参数：
+
+```bash
+cargo build --release --locked
+./target/release/lp-maker --config config/local.toml run --execute --first-entry
+```
+
+这会实际运行实盘策略。先停止原策略进程，并沿用同一配置、状态目录及已设置的密钥环境变量。参数在完成链上与交易所对账后才生效；要求无未决操作、未完成工作流、现有 LP、WETH 库存或空单。已知 LP 历史（包括登记 NFT）优先，参数不能将 `established` 重置为 `initial`。迁移成功会写入审计日志并保存，后续运行无需再带该参数。不要删除状态文件或把冷却配置改成 0 来实现首次豁免。
+
+空仓新增 LP 前会先读取 Hyperliquid 的实际账户权益及可用保证金。以 `LP 预算 × 建仓比例 / 杠杆 / 0.9` 检查保证金余量，并同时受配置的保证金预算限制；不足时记录 `entry_waiting_hedge_collateral`，不买入 WETH、不铸造 LP，保持等待并在下一轮重新检查。已有风险库存仍可退出到稳定币，执行对冲前仍再次检查保证金。200 美元配置的 LP 预算为 120、杠杆为 3 时，这项前置门槛约为 44.45 USDC；配置的 60 美元保证金应实际存入 Hyperliquid，仅填写配置不会产生资金。
 
 ## 查看与运行
 

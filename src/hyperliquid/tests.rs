@@ -2,10 +2,11 @@
 //! All network requests stay on loopback; signing uses a public fixed test vector.
 use crate::{
     config::Config,
-    domain::{LiquidityExecutor, LpPosition, PoolSnapshot},
+    domain::{Decision, HedgeVenue, LiquidityExecutor, LpIntent, LpPosition, PoolSnapshot},
     engine::{self, Live},
     hyperliquid::{Client, journal::Orders},
     store::Store,
+    strategy::{EntryHistory, Phase, Strategy},
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -32,10 +33,10 @@ impl LiquidityExecutor for NoLiquidity {
         unreachable!()
     }
     async fn current_positions(&self) -> Result<Vec<LpPosition>> {
-        unreachable!()
+        Ok(vec![])
     }
     async fn wallet_balances(&self) -> Result<(f64, f64)> {
-        unreachable!()
+        Ok((0.0, 120.0))
     }
     async fn mint_layer(&self, _: &str, _: f64, _: f64) -> Result<()> {
         unreachable!()
@@ -61,6 +62,11 @@ struct ExchangeState {
     fail_cancel_meta: usize,
     target_role: Option<String>,
     target_owner: Option<String>,
+    collateral: Option<f64>,
+    account_mode: Option<String>,
+    next_mode: Option<String>,
+    spot_state: Option<Value>,
+    active_state: Option<Value>,
 }
 struct Mock {
     url: String,
@@ -130,6 +136,12 @@ impl Mock {
                         }
                     } else {
                         match q["type"].as_str().unwrap() {
+                            "userAbstraction" => {
+                                let mode = s.account_mode.clone().unwrap_or_else(|| "default".into());
+                                if let Some(next) = s.next_mode.take() {s.account_mode=Some(next);}
+                                json!(mode)
+                            }
+                            "spotClearinghouseState" => s.spot_state.clone().expect("unexpected spot request"),
                             "meta" => {
                                 json!({"universe":[{"name":"ETH","szDecimals":4,"maxLeverage":25}]})
                             }
@@ -142,7 +154,8 @@ impl Mock {
                                 } else {
                                     json!([{"position":{"coin":"ETH","szi":"-0.006"}}])
                                 };
-                                json!({"assetPositions":positions,"withdrawable":"60","marginSummary":{"accountValue":"60"}})
+                                let collateral = s.collateral.unwrap_or(60.0).to_string();
+                                json!({"assetPositions":positions,"withdrawable":collateral,"marginSummary":{"accountValue":collateral}})
                             }
                             "openOrders" => {
                                 if !s.submitted_id.is_empty() && !s.canceled {
@@ -172,7 +185,7 @@ impl Mock {
                                 "validUntil":if s.expired_agent {1} else {crate::now_ms()+3_600_000}}])
                             }
                             "activeAssetData" => {
-                                json!({"user":USER,"coin":"ETH","leverage":{"type":"isolated","value":3}})
+                                s.active_state.clone().unwrap_or_else(|| json!({"user":USER,"coin":"ETH","leverage":{"type":"isolated","value":3}}))
                             }
                             "orderStatus" => {
                                 if q["oid"].as_str() == Some(s.submitted_id.as_str()) {
@@ -214,6 +227,219 @@ fn live(c: Config, store: Arc<Store>, url: &str) -> Live {
         store,
         cfg: c,
     }
+}
+fn unified_fixture(mock: &Mock, sell_available: &str) {
+    let mut s = mock.state.lock().unwrap();
+    s.account_mode = Some("unifiedAccount".into());
+    s.collateral = Some(0.0); // Same native-perp zero balance returned by the user's account.
+    s.spot_state = Some(
+        json!({"balances":[{"coin":"USDC","token":0,"total":"79.6","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"79.6"]]}),
+    );
+    s.active_state = Some(
+        json!({"user":USER,"coin":"ETH","leverage":{"type":"isolated","value":3,"rawUsd":"0"},"availableToTrade":["79.6",sell_available],"maxTradeSzs":["0.0959","0.0959"],"markPx":"2488.98"}),
+    );
+}
+#[tokio::test]
+async fn unified_balance_reaches_portfolio_entry_guard_and_actual_hedge_order() {
+    let mock = Mock::start().await;
+    unified_fixture(&mock, "79.6");
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let l = live(config(), store.clone(), &mock.url);
+    let p = l.portfolio().await.unwrap();
+    assert_eq!(p.hedge_equity, 79.6);
+    let snapshot = store
+        .read::<Value>("account_snapshot.json")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        snapshot["account"]["lpMakerCollateral"]["equity_usdc"],
+        79.6
+    );
+    assert_eq!(snapshot["account"]["withdrawable"], "0");
+    let d = Decision {
+        state: "Active".into(),
+        reasons: vec![],
+        lp: LpIntent::Deploy { fraction: 1.0 },
+        target_short_base: 0.0,
+        emergency: false,
+    };
+    l.preflight_entry(&d, &p).await.unwrap();
+    assert!(store.pending().unwrap().is_none());
+    assert!(mock.state.lock().unwrap().actions.is_empty());
+    // Public fixture signature goes to loopback ONLY. Maker and cancel must reach execution.
+    l.hedge(0.008, false).await.unwrap();
+    assert_eq!(
+        mock.state.lock().unwrap().actions,
+        vec!["order", "cancelByCloid"]
+    );
+    assert!(store.pending().unwrap().is_none());
+}
+#[tokio::test]
+async fn unified_short_side_collateral_still_blocks_entry_and_hedge_when_insufficient() {
+    let mock = Mock::start().await;
+    unified_fixture(&mock, "0.5"); // Long availability cannot be used as short collateral.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let l = live(config(), store.clone(), &mock.url);
+    let d = Decision {
+        state: "Active".into(),
+        reasons: vec![],
+        lp: LpIntent::Deploy { fraction: 1.0 },
+        target_short_base: 0.0,
+        emergency: false,
+    };
+    assert!(
+        l.apply(&d)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("entry_waiting_hedge_collateral")
+    );
+    assert!(
+        l.hedge(0.008, false)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("insufficient free hedge collateral")
+    );
+    assert!(store.read::<Value>("workflow.json").unwrap().is_none());
+    assert!(store.pending().unwrap().is_none());
+    assert!(mock.state.lock().unwrap().actions.is_empty());
+}
+#[tokio::test]
+async fn account_mode_switch_and_missing_capacity_block_without_signing() {
+    let mock = Mock::start().await;
+    unified_fixture(&mock, "79.6");
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let l = live(config(), store.clone(), &mock.url);
+    mock.state.lock().unwrap().next_mode = Some("default".into());
+    assert!(
+        l.hl.account()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("mode changed")
+    );
+    unified_fixture(&mock, "79.6");
+    mock.state
+        .lock()
+        .unwrap()
+        .active_state
+        .as_mut()
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("availableToTrade");
+    assert!(
+        l.hl.account()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("availableToTrade")
+    );
+    mock.state.lock().unwrap().account_mode = Some("portfolioMargin".into());
+    assert!(
+        l.hl.account()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported")
+    );
+    assert!(store.pending().unwrap().is_none());
+    assert!(mock.state.lock().unwrap().actions.is_empty());
+}
+#[tokio::test]
+async fn standard_account_does_not_spend_spot_only_balance() {
+    let mock = Mock::start().await;
+    unified_fixture(&mock, "79.6");
+    mock.state.lock().unwrap().account_mode = Some("disabled".into());
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let l = live(config(), store.clone(), &mock.url);
+    assert_eq!(l.portfolio().await.unwrap().hedge_equity, 0.0);
+    assert!(l.hedge(0.008, false).await.is_err());
+    assert!(store.pending().unwrap().is_none());
+    assert!(mock.state.lock().unwrap().actions.is_empty());
+}
+#[tokio::test]
+async fn zero_hedge_collateral_blocks_entry_before_any_swap_or_signed_action() {
+    let mock = Mock::start().await;
+    mock.state.lock().unwrap().collateral = Some(0.0);
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let c = config();
+    let l = live(c, store.clone(), &mock.url);
+    let mut d = Decision {
+        state: "Active".into(),
+        reasons: vec![],
+        lp: LpIntent::Deploy { fraction: 1.0 },
+        target_short_base: 0.0,
+        emergency: false,
+    };
+    // Every LiquidityExecutor mutation panics, so this catches a buy before the guard.
+    assert!(
+        l.apply(&d)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("entry_waiting_hedge_collateral")
+    );
+    assert!(store.read::<Value>("workflow.json").unwrap().is_none());
+    assert!(store.pending().unwrap().is_none());
+    assert!(mock.state.lock().unwrap().actions.is_empty());
+    let p = l.portfolio().await.unwrap();
+    let previous = Strategy {
+        phase: Phase::Paused,
+        pause_since: 1234,
+        ..Default::default()
+    };
+    let mut evaluated = previous.clone();
+    evaluated.phase = Phase::Active;
+    evaluated.fraction = 1.0;
+    evaluated.peak_equity = 200.0;
+    engine::defer_entry(&mut evaluated, &previous, &mut d, &p);
+    assert_eq!(evaluated.phase, Phase::Paused);
+    assert_eq!(evaluated.entry_history, EntryHistory::Initial);
+    assert_eq!(evaluated.pause_since, 1234);
+    assert_eq!(evaluated.fraction, 0.0);
+    assert_eq!(evaluated.peak_equity, 200.0);
+    assert_eq!(d.lp, LpIntent::Hold);
+    // Normal polling can retry after funding; no timer/state reset is necessary.
+    mock.state.lock().unwrap().collateral = Some(60.0);
+    d.lp = LpIntent::Deploy { fraction: 1.0 };
+    l.preflight_entry(&d, &p).await.unwrap();
+    assert!(mock.state.lock().unwrap().actions.is_empty());
+}
+#[tokio::test]
+async fn entry_collateral_guard_keeps_buffer_and_allows_risk_exit() {
+    let mock = Mock::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let l = live(config(), store, &mock.url);
+    let p = l.portfolio().await.unwrap();
+    let mut d = Decision {
+        state: "Active".into(),
+        reasons: vec![],
+        lp: LpIntent::Deploy { fraction: 1.0 },
+        target_short_base: 0.0,
+        emergency: false,
+    };
+    mock.state.lock().unwrap().collateral = Some(40.0); // Exactly 120 / 3 leaves no buffer.
+    assert!(l.preflight_entry(&d, &p).await.is_err());
+    mock.state.lock().unwrap().collateral = Some(45.0);
+    l.preflight_entry(&d, &p).await.unwrap();
+    mock.state.lock().unwrap().collateral = Some(0.0);
+    d.lp = LpIntent::ExitToQuote;
+    l.preflight_entry(&d, &p).await.unwrap();
+    let previous = Strategy::default();
+    let mut evaluated = previous.clone();
+    let mut exposed = p.clone();
+    exposed.wallet_base = 0.01;
+    engine::defer_entry(&mut evaluated, &previous, &mut d, &exposed);
+    assert_eq!(d.lp, LpIntent::ExitToQuote);
+    assert!(d.emergency);
 }
 #[tokio::test]
 async fn partial_fill_dust_defers_without_phantom_order_and_restart_succeeds() {

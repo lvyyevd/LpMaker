@@ -1,13 +1,32 @@
 //! Restart checkpoints and auditable recovery progress. Remote balances remain authoritative.
 use crate::{
     config::{Config, Mode},
+    domain::Portfolio,
     engine::Paper,
     store::Store,
-    strategy::{Phase, Strategy},
+    strategy::{EntryHistory, Phase, Strategy},
 };
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
+
+/// Keep the original baseline intact. A ledger-source change is not investment income.
+pub fn equity_baseline(store: &Store, current: f64, basis: &str) -> Result<(f64, bool)> {
+    ensure!(current.is_finite(), "invalid equity baseline");
+    let old = store.read::<f64>("equity_baseline.json")?;
+    if let Some(old) = old {
+        let old_basis = store.read::<String>("equity_baseline_basis.json")?;
+        let comparable = match old_basis {
+            Some(old_basis) => old_basis == basis,
+            None => matches!(basis, "native_perps_v1" | "paper_v1"),
+        };
+        return Ok((old, comparable));
+    }
+    store.write("equity_baseline_basis.json", &basis)?;
+    store.write("equity_baseline.json", &current)?;
+    Ok((current, true))
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Checkpoint {
@@ -40,8 +59,63 @@ fn export(store: &Store, checkpoint: &Checkpoint) -> Result<()> {
     }
     Ok(())
 }
+/// Durable evidence survives a crash after mint but before checkpoint save.
+pub fn record_lp_history(store: &Store, evidence: Value) -> Result<()> {
+    if let Some(history) = store.read::<Value>("lp_history.json")? {
+        ensure!(history["ever_opened"] == true, "invalid LP history marker");
+        return Ok(());
+    }
+    store.write(
+        "lp_history.json",
+        &json!({"ever_opened":true,"observed_ms":crate::now_ms(),"evidence":evidence}),
+    )
+}
+fn restore_entry_history(store: &Store, strategy: &mut Strategy) -> Result<()> {
+    let registered = store
+        .read::<BTreeMap<String, String>>("nfts.json")?
+        .is_some_and(|ids| !ids.is_empty());
+    if registered || strategy.entry_history == EntryHistory::Established {
+        record_lp_history(store, json!({"source":"saved_lp_history_or_nft_registry"}))?;
+    }
+    if let Some(history) = store.read::<Value>("lp_history.json")? {
+        ensure!(history["ever_opened"] == true, "invalid LP history marker");
+        strategy.entry_history = EntryHistory::Established;
+    } else if strategy.entry_history == EntryHistory::LegacyUnknown
+        && strategy.phase == Phase::Warmup
+    {
+        // Warmup has never passed the initial-entry state transition.
+        strategy.entry_history = EntryHistory::Initial;
+    }
+    Ok(())
+}
+/// Explicit assertion for an older checkpoint only; never resets known LP history or a halt.
+/// The caller must first reconcile chain state and all account orders/workflows.
+pub fn confirm_first_entry(
+    store: &Store,
+    strategy: &mut Strategy,
+    portfolio: &Portfolio,
+) -> Result<bool> {
+    strategy.observe_lp(!portfolio.positions.is_empty());
+    restore_entry_history(store, strategy)?;
+    if strategy.entry_history != EntryHistory::LegacyUnknown || strategy.phase == Phase::Halted {
+        return Ok(false);
+    }
+    ensure!(
+        store.pending()?.is_none() && store.read::<Value>("workflow.json")?.is_none(),
+        "first entry requires completed transaction/workflow reconciliation"
+    );
+    ensure!(
+        portfolio.positions.is_empty()
+            && portfolio.wallet_base.abs() <= 1e-8
+            && portfolio.short_base.abs() <= 1e-8,
+        "first entry confirmation requires flat reconciled inventory"
+    );
+    strategy.entry_history = EntryHistory::Initial;
+    store.event("first_entry_confirmed", json!({"note":"operator confirmed no prior LP deployment for legacy state; current inventory reconciled flat"}))?;
+    Ok(true)
+}
 pub fn load(store: &Store, c: &Config) -> Result<(Strategy, Paper)> {
-    if let Some(cp) = store.read::<Checkpoint>("checkpoint.json")? {
+    if let Some(mut cp) = store.read::<Checkpoint>("checkpoint.json")? {
         ensure!(
             cp.schema == 1 && cp.mode == c.mode,
             "checkpoint schema/mode mismatch; refusing to reset state"
@@ -50,6 +124,7 @@ pub fn load(store: &Store, c: &Config) -> Result<(Strategy, Paper)> {
             c.mode != Mode::Paper || cp.paper.is_some(),
             "paper checkpoint has no ledger"
         );
+        restore_entry_history(store, &mut cp.strategy)?;
         export(store, &cp)?; // Repair a crash between the commit and compatibility-file writes.
         return Ok((cp.strategy, cp.paper.unwrap_or_else(|| Paper::new(c))));
     }
@@ -63,7 +138,8 @@ pub fn load(store: &Store, c: &Config) -> Result<(Strategy, Paper)> {
         c.mode != Mode::Paper || strategy.is_some() == paper.is_some(),
         "incomplete legacy paper files; refusing to reset balances or risk phase"
     );
-    let strategy = strategy.unwrap_or_default();
+    let mut strategy = strategy.unwrap_or_default();
+    restore_entry_history(store, &mut strategy)?;
     let paper = paper.unwrap_or_else(|| Paper::new(c));
     save(store, c, &strategy, &paper)?;
     stage(store, "checkpoint_migrated", json!({"schema":1}))?;

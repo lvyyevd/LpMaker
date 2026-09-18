@@ -24,6 +24,8 @@ pub struct PortfolioObservation {
     pub mark_price: f64,
     pub portfolio: Portfolio,
     pub baseline_equity: f64,
+    #[serde(default)]
+    pub baseline_comparable: Option<bool>,
 }
 #[derive(Clone, Debug, Default, Serialize)]
 struct Health {
@@ -139,6 +141,7 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
         }
     };
     let mut last_swap = Value::Null;
+    let mut account_ws = Value::Null;
     tracing::info!(mode=?c.mode, hl_seconds=c.monitoring.hyperliquid_interval_seconds, lp_seconds=c.monitoring.robinhood_interval_seconds, "monitor started");
     let result:Result<()> = async {
         loop {
@@ -152,13 +155,15 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                 e=hl_rx.recv()=>{if let Some(e)=e {
                     hh.update(&e);
                     match e.channel.as_str() {
-                        "connected"|"disconnected"=>{prices.clear();account=Value::Null;},
+                        "connected"|"disconnected"=>{prices.clear();account=Value::Null;account_ws=Value::Null;},
                         "allMids"=>{for coin in &c.hyperliquid.coins { if !e.data["mids"][coin].is_null() {
                             prices.insert(coin.clone(),json!({"price":e.data["mids"][coin],"received_ms":e.received_ms,"source":"native_ws"}));
                         }}},
-                        "clearinghouseState"=>{
-                            let data=e.data.get("clearinghouseState").unwrap_or(&e.data);
-                            account=json!({"observed_ms":e.received_ms,"source":"native_ws","state":data});
+                        "clearinghouseState"|"spotState"|"activeAssetData"=>{
+                            // Raw WS messages cannot overwrite a mode-aware REST collateral snapshot.
+                            if !account_ws.is_object() {account_ws=json!({});}
+                            let key=if e.channel=="activeAssetData" {format!("activeAssetData:{}",e.data["coin"].as_str().unwrap_or("unknown"))} else {e.channel.clone()};
+                            account_ws[key]=json!({"observed_ms":e.received_ms,"source":"native_ws","data":e.data});
                         },
                         "orderUpdates"|"userFills"|"userFundings"=>tracing::info!(channel=%e.channel,data=%e.data,"Hyperliquid account event"),
                         _=>{},
@@ -177,7 +182,7 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                 }},
                 _=htimer.tick()=>{
                     let paper = if c.mode==Mode::Paper {store.read::<Paper>("paper.json")?} else {None};
-                    let report=json!({"time_ms":crate::now_ms(),"ws":hh,"prices":prices,"account":account,
+                    let report=json!({"time_ms":crate::now_ms(),"ws":hh,"prices":prices,"account":account,"collateral":account["state"]["lpMakerCollateral"],"account_ws":account_ws,
                         "account_configured":hl.user().is_ok(),"account_age_ms":account["observed_ms"].as_u64().map(|t|crate::now_ms().saturating_sub(t)),"ws_data_age_ms":hh.last_data_ms.map(|t|crate::now_ms().saturating_sub(t)),"refresh_pending":hbusy,"last_refresh_error":herr,
                         "paper_position":paper.map(|p|json!({"coin":c.hyperliquid.hedge_coin,"short_base":p.portfolio.short_base,"equity":p.portfolio.hedge_equity,"pending_order":p.pending}))});
                     tracing::info!(report=%report,"Hyperliquid status");
@@ -279,7 +284,9 @@ async fn refresh_chain(c: &Config, venue: &UniswapV3, store: &Store) -> Result<V
         let pnl = if let Some(obs) = store.read::<PortfolioObservation>("portfolio.json")? {
             json!({"basis":"live equity change, includes unclaimed LP fees; excludes gas and is NOT adjusted for deposits/withdrawals",
                 "observed_ms":obs.observed_ms,"equity_usd":obs.portfolio.equity(obs.mark_price),
-                "equity_change_usd":obs.portfolio.equity(obs.mark_price)-obs.baseline_equity})
+                "baseline_comparable":obs.baseline_comparable,
+                "status":if obs.baseline_comparable==Some(false) {"accounting_basis_changed; corrected collateral is not profit"} else {"observed"},
+                "equity_change_usd":if obs.baseline_comparable==Some(false) {Value::Null} else {json!(obs.portfolio.equity(obs.mark_price)-obs.baseline_equity)}})
         } else {
             json!({"status":"no_strategy_equity_baseline","equity_change_usd":Value::Null})
         };

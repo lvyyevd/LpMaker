@@ -6,7 +6,7 @@ use lp_maker::{
     hyperliquid::{Asset, orders, signing, validate_response},
     math,
     store::Store,
-    strategy::{Phase, Strategy, indicators},
+    strategy::{EntryHistory, Phase, Strategy, indicators},
 };
 use serde_json::json;
 fn config() -> Config {
@@ -288,10 +288,128 @@ fn future_or_duplicate_hour_does_not_supply_warmup() {
     assert!(indicators::calculate(&f.candles, &c.strategy, f.now_ms).is_err());
 }
 #[test]
+fn first_entry_retries_without_cooldown_or_six_new_healthy_hours() {
+    let c = config();
+    let f = frame(&c, candles(200, 0.0001));
+    let mut s = Strategy {
+        phase: Phase::Paused,
+        pause_since: f.now_ms,
+        ..Default::default()
+    };
+    let d = s.evaluate(&c.strategy, &f);
+    assert_eq!(d.lp, LpIntent::Deploy { fraction: 1.0 });
+    assert_eq!(s.phase, Phase::Active);
+    assert_eq!(s.healthy_hours, 1);
+    // A decision alone is not proof that mint succeeded.
+    assert_eq!(s.entry_history, EntryHistory::Initial);
+    assert!(d.reasons.iter().any(|r| r.starts_with("initial_entry:")));
+}
+#[test]
+fn first_entry_exemption_preserves_all_market_and_halt_gates() {
+    let c = config();
+    let healthy = frame(&c, candles(200, 0.0001));
+    let mut cases = vec![frame(&c, candles(200, -0.001))];
+    let mut fast = healthy.clone();
+    fast.pool.price *= 0.98;
+    fast.hedge_price = fast.pool.price;
+    cases.push(fast);
+    let mut basis = healthy.clone();
+    basis.hedge_price *= 1.1;
+    cases.push(basis);
+    let mut stale = healthy.clone();
+    stale.pool.time_ms -= 120_000;
+    cases.push(stale);
+    let mut missing = healthy.clone();
+    missing.candles = candles(10, 0.0001);
+    cases.push(missing);
+    let mut volatile = healthy.clone();
+    for (i, bar) in volatile.candles.iter_mut().rev().take(6).enumerate() {
+        bar.close *= if i % 2 == 0 { 1.003 } else { 0.997 };
+        bar.high = bar.high.max(bar.close);
+        bar.low = bar.low.min(bar.close);
+    }
+    assert!(
+        indicators::calculate(&volatile.candles, &c.strategy, volatile.now_ms)
+            .unwrap()
+            .vol_ratio
+            > c.strategy.vol_pause_ratio
+    );
+    cases.push(volatile);
+    for f in cases {
+        let mut s = Strategy {
+            phase: Phase::Paused,
+            pause_since: f.now_ms,
+            ..Default::default()
+        };
+        assert!(!matches!(
+            s.evaluate(&c.strategy, &f).lp,
+            LpIntent::Deploy { .. }
+        ));
+        assert_ne!(s.phase, Phase::Active);
+    }
+    let mut halted = Strategy {
+        phase: Phase::Halted,
+        ..Default::default()
+    };
+    assert_eq!(
+        halted.evaluate(&c.strategy, &healthy).lp,
+        LpIntent::ExitToQuote
+    );
+    assert_eq!(halted.phase, Phase::Halted);
+}
+#[test]
+fn first_real_lp_consumes_exemption_even_after_exit_and_restart() {
+    let c = config();
+    let mut f = frame(&c, candles(200, 0.0001));
+    let mut s = Strategy::default();
+    let mut p = Paper::new(&c);
+    p.apply(
+        &s.evaluate(&c.strategy, &f),
+        &c,
+        f.pool.price,
+        f.hedge_price,
+        f.now_ms,
+    )
+    .unwrap();
+    assert!(!p.portfolio.positions.is_empty());
+    f.portfolio = p.portfolio;
+    s.evaluate(&c.strategy, &f);
+    assert_eq!(s.entry_history, EntryHistory::Established);
+    // Closed inventory and a restart must not make the account "initial" again.
+    f.portfolio = Paper::new(&c).portfolio;
+    s.observe_lp(false);
+    s.phase = Phase::Paused;
+    s.pause_since = f.now_ms;
+    s.healthy_hours = c.strategy.resume_healthy_hours;
+    let mut restored: Strategy = serde_json::from_value(serde_json::to_value(s).unwrap()).unwrap();
+    let d = restored.evaluate(&c.strategy, &f);
+    assert_eq!(d.lp, LpIntent::ExitToQuote);
+    assert!(
+        d.reasons
+            .iter()
+            .any(|r| r.contains("cooldown_remaining_seconds=21600"))
+    );
+    assert_eq!(restored.entry_history, EntryHistory::Established);
+}
+#[test]
+fn legacy_or_established_warmup_cannot_rearm_first_entry() {
+    let c = config();
+    let f = frame(&c, candles(200, 0.0001));
+    for history in [EntryHistory::LegacyUnknown, EntryHistory::Established] {
+        let mut s = Strategy {
+            entry_history: history,
+            ..Default::default()
+        };
+        assert_eq!(s.evaluate(&c.strategy, &f).lp, LpIntent::ExitToQuote);
+        assert_eq!(s.phase, Phase::Paused);
+    }
+}
+#[test]
 fn repeated_polling_does_not_speed_up_recovery() {
     let c = config();
     let f = frame(&c, candles(200, 0.0001));
     let mut s = Strategy {
+        entry_history: EntryHistory::Established,
         phase: Phase::Paused,
         pause_since: f.now_ms - 10 * 3_600_000,
         ..Default::default()
@@ -308,6 +426,7 @@ fn recovery_is_fractional_and_requires_completed_hours() {
     let bars = candles(210, 0.0001);
     let initial = frame(&c, bars[..200].to_vec());
     let mut s = Strategy {
+        entry_history: EntryHistory::Established,
         phase: Phase::Paused,
         pause_since: initial.now_ms - 10 * 3_600_000,
         ..Default::default()
@@ -446,6 +565,7 @@ fn recovery_counters_reset_across_observation_gaps() {
     let bars = candles(220, 0.0001);
     let f = frame(&c, bars[..200].to_vec());
     let mut s = Strategy {
+        entry_history: EntryHistory::Established,
         phase: Phase::Paused,
         pause_since: f.now_ms - 20 * 3_600_000,
         ..Default::default()
