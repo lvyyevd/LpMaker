@@ -2,7 +2,7 @@
 
 本模块接入 SOL/USDC 池 `5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6`，Hyperliquid 对冲币种为 SOL。
 
-[30 天研究报告](../backtests/solana/2026-09-18/REPORT.md)包含数据覆盖、12 组参数、训练/独立测试窗口、租金约束及费用敏感性。当前没有证据证明个人 LP 手续费足以覆盖模型损耗；默认配置仅用于模拟。
+本地 `backtests/solana/2026-09-18/REPORT.md` 包含数据覆盖、12 组参数、训练/独立测试窗口、租金约束及费用敏感性。整个 `backtests/solana/` 目录不纳入 Git；新克隆的仓库需自行准备历史数据后再运行回测。当前没有证据证明个人 LP 手续费足以覆盖模型损耗；默认配置仅用于模拟。
 
 ## 模块边界
 

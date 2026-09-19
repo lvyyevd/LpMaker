@@ -6,3 +6,6 @@
 /adapters/solana/node_modules/
 .env.*
 /config/solana.local.toml
+
+# Solana historical data and generated backtest artifacts stay local.
+/backtests/solana/

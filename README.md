@@ -170,7 +170,7 @@ cargo clippy --locked --all-targets -- -D warnings
 新增独立 `lp-maker-solana`，目标 SOL/USDC 池 `5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6`，对冲继续使用 Hyperliquid。配置、Solana 签名 journal 和状态目录与 EVM 分开；原 `lp-maker` 的命令不变。
 
 - [接入、运行和重启说明](docs/solana.md)
-- [最近 30 天参数比较与数据限制](backtests/solana/2026-09-18/REPORT.md)
+- 最近 30 天参数比较与数据限制：本地 `backtests/solana/2026-09-18/REPORT.md`（不纳入 Git）
 - [默认模拟配置](config/solana.toml)
 
 当前回测未能证明实际个人 LP 费覆盖损耗；默认仅模拟。服务商完整 RPC/gRPC 地址未提供，真实服务联调和完整 swap 模拟仍待完成，不能把本地测试当成实盘验收。
@@ -178,4 +178,6 @@ cargo clippy --locked --all-targets -- -D warnings
 
 新增可选的 `config/solana-regime.toml`，在独立 Solana Rust 策略模块中实现下降趋势/大波动退出、趋势确认入场、越界退出和持久化冷却。默认 paper，原 EVM 和原 Solana 配置行为保持不变。
 
-40% 假设 LP 手续费 APR 下，六个月真实双市场小时模型仅小幅盈利；后段独立测试和双倍成本检查未通过，不能视为稳定盈利策略。见 [运行与模块说明](docs/solana-regime.md) 和 [可复算研究报告](backtests/solana/2026-09-18-six-month/REPORT.md)。
+40% 假设 LP 手续费 APR 下，六个月真实双市场小时模型仅小幅盈利；后段独立测试和双倍成本检查未通过，不能视为稳定盈利策略。见 [运行与模块说明](docs/solana-regime.md)；本地研究报告位于 `backtests/solana/2026-09-18-six-month/REPORT.md`。
+
+`backtests/solana/` 中的行情、原始响应、参数搜索结果、图表和报告仅保存在本地，Git 忽略整个目录。仓库保留 Rust 策略、配置模板和 `scripts/solana/` 研究脚本；新克隆的仓库需要另行准备回测输入，不包含历史回测成果。

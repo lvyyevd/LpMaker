@@ -7,3 +7,4 @@
 - Do not remove the downtrend/volatility pause or turn cooldown expiry into automatic LP rebuilding.
 - Add tests for changed financial logic and recovery behavior. Run cargo fmt, cargo test and cargo clippy.
 - Document simulation assumptions; never fabricate LP fees or claim a backtest proves profitability.
+- Keep Solana historical data and generated backtest artifacts under `backtests/solana/` local. Do not commit or force-add them; retain the strategy code, configuration templates and research scripts in Git.
