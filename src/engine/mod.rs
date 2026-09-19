@@ -1,4 +1,5 @@
 //! 运行入口与恢复循环。保持原检查点字段、配置指纹和交易顺序，重启沿用旧状态。
+pub mod entry_rearm;
 mod live;
 mod paper;
 use crate::{
@@ -289,7 +290,7 @@ async fn run_strategy(
             portfolio,
         };
         let previous = strategy.clone();
-        let mut d = strategy.evaluate(&c.strategy, &frame);
+        let mut d = entry_rearm::evaluate(&store, &c, &mut strategy, &frame)?;
         let mut entry_deferred = false;
         if let Some(l) = &live
             && let Err(error) = l.preflight_entry(&d, &frame.portfolio).await
@@ -303,6 +304,7 @@ async fn run_strategy(
         store.event("decision",json!({"decision":d,"pool":frame.pool,"equity":frame.portfolio.equity(frame.pool.price),"net_base":frame.portfolio.base()-frame.portfolio.short_base}))?;
         tracing::info!(phase=%d.state,entry_history=?strategy.entry_history,action=?d.lp,price=frame.pool.price,equity=frame.portfolio.equity(frame.pool.price),reasons=?d.reasons,"strategy decision");
         if live.is_some() {
+            entry_rearm::consume(&store, &c, &d)?;
             recovery::save(&store, &c, &strategy, &paper)?;
         }
         if !entry_deferred

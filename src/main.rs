@@ -77,6 +77,11 @@ enum Command {
     },
     /// Resolve a persisted uncertain operation by its actual on-chain/exchange state.
     Reconcile,
+    /// Explicit one-time first-entry waiting waiver after reconciling flat live inventory.
+    RearmEntry {
+        #[arg(long)]
+        execute: bool,
+    },
     /// Inspect persisted state and unresolved operations; no key required.
     Status,
     /// Fail unless recent completed strategy decisions prove the runner is healthy.
@@ -299,10 +304,12 @@ async fn main() -> Result<()> {
                 "orders":store.read::<Value>("orders.json")?,"open_orders":store.read::<Value>("open_orders.json")?,
                 "live_inventory":store.read::<Value>("live_inventory.json")?,"lp_inventory":store.read::<Value>("lp_inventory.json")?,
                 "nonce":store.read::<Value>("evm_nonce.json")?,"startup_reconciliation":store.read::<Value>("startup_reconciliation.json")?,
+                "entry_rearm":store.read::<engine::entry_rearm::Permit>("entry_rearm.json")?,
                 "runtime_health":store.read::<Value>("runtime_health.json")?,"hedge_residual":store.read::<Value>("hedge_residual.json")?,
                 "hl_identity":store.read::<Value>("hl_identity.json")?}))
         },
         Command::Reconcile => print(engine::reconcile(&c, store).await?),
+        Command::RearmEntry { execute } => print(engine::entry_rearm::request(c, store, execute).await?),
         Command::Info { command } => {
             let result = match command {
                 InfoCommand::Assets => serde_json::to_value(hl.assets().await?)?,
