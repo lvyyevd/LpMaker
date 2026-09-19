@@ -2,6 +2,7 @@
 pub mod entry_rearm;
 mod live;
 mod paper;
+pub mod reset;
 use crate::{
     config::{Config, Mode},
     domain::*,
@@ -25,6 +26,10 @@ pub async fn run(
     execute: bool,
     first_entry: bool,
 ) -> Result<()> {
+    ensure!(
+        store.read::<Value>("manual_reset.json")?.is_none(),
+        "手工退出/清理尚未完成；保留记录，重新执行 reset-flat --execute，勿直接运行策略"
+    );
     recovery::start(&store)?;
     crate::runtime::status(&store, "starting", json!({"pid":std::process::id()}))?;
     let mut supervisor = crate::monitor::Supervisor::start(c.clone(), store.clone());

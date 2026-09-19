@@ -27,6 +27,50 @@ fn base() -> Config {
 fn robinhood() -> Config {
     Config::load("config/paper-200.toml").unwrap()
 }
+
+#[tokio::test]
+async fn manual_exit_discovers_unregistered_and_empty_nfts_only_for_configured_pool() {
+    let mut c = robinhood();
+    let token0: Address = c.liquidity.base_token.parse().unwrap();
+    let token1: Address = c.liquidity.quote_token.parse().unwrap();
+    let fee = c.liquidity.fee;
+    let mock = Mock::start(move |req| {
+        if req["method"] == "eth_blockNumber" {
+            return Ok(json!("0x100"));
+        }
+        assert_eq!(req["method"], "eth_call");
+        let data = hex::decode(
+            req["params"][0]["data"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("0x"),
+        )
+        .unwrap();
+        if data.starts_with(&keccak256("balanceOf(address)")[..4]) {
+            return Ok(words(&[U256::from(3)]));
+        }
+        if data.starts_with(&keccak256("tokenOfOwnerByIndex(address,uint256)")[..4]) {
+            return Ok(words(&[
+                U256::from_be_slice(&data[36..68]) + U256::from(100)
+            ]));
+        }
+        assert!(data.starts_with(&keccak256("positions(uint256)")[..4]));
+        let id = U256::from_be_slice(&data[4..36]).to::<u64>();
+        let mut p = vec![U256::ZERO; 12];
+        p[2] = address_word(token0);
+        p[3] = address_word(token1);
+        p[4] = U256::from(if id == 102 { fee + 1 } else { fee });
+        p[7] = U256::from(if id == 101 { 0 } else { 100 });
+        p[10] = U256::from(5);
+        Ok(words(&p))
+    })
+    .await;
+    c.liquidity.rpc_url = mock.url.clone();
+    let v = liquidity::connect(c.liquidity).unwrap();
+    let owner = Address::from([1_u8; 20]);
+    assert_eq!(v.token_ids(owner).await.unwrap(), vec!["100"]);
+    assert_eq!(v.exit_token_ids(owner).await.unwrap(), vec!["100", "101"]);
+}
 fn words(values: &[U256]) -> Value {
     json!(format!(
         "0x{}",

@@ -116,6 +116,19 @@ impl UniswapV3 {
         self.token_ids_at(owner, "latest").await
     }
     pub async fn token_ids_at(&self, owner: Address, block: &str) -> Result<Vec<String>> {
+        self.matching_token_ids_at(owner, block, false).await
+    }
+    /// 手工退出包含已经移除流动性、但仍可能留有待领手续费的 NFT。
+    pub async fn exit_token_ids(&self, owner: Address) -> Result<Vec<String>> {
+        let block = format!("0x{:x}", self.rpc.block_number().await?);
+        self.matching_token_ids_at(owner, &block, true).await
+    }
+    async fn matching_token_ids_at(
+        &self,
+        owner: Address,
+        block: &str,
+        include_empty: bool,
+    ) -> Result<Vec<String>> {
         let count = self
             .rpc
             .words(
@@ -146,7 +159,7 @@ impl UniswapV3 {
             let t1 = word_address(p[3]);
             if ((t0 == self.base && t1 == self.quote) || (t0 == self.quote && t1 == self.base))
                 && p[4] == U256::from(self.cfg.fee)
-                && p[7] > U256::ZERO
+                && (include_empty || p[7] > U256::ZERO)
             {
                 ids.push(id.to_string());
             }

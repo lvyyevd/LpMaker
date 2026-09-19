@@ -108,6 +108,20 @@ LP 最低量按 V3 流动性公式和价格滑点边界计算，不再对两种�
 
 ## 查看与运行
 
+### 一键退出、重置并重新启动（默认 Linux 实盘）
+
+```bash
+bash scripts/exit-reset-restart.sh
+```
+
+这是实际交易操作。脚本编译后停止 `config/local.toml` 的旧进程，执行专用 `reset-flat --execute`，确认完成后才后台启动。范围是配置池的**全部 NFT（含丢失本地登记的仓位、零流动性待领手续费 NFT）**、LP 钱包的全部基础代币（Robinhood 为 WETH）及配置的 Hyperliquid 对冲币（ETH）的全部普通/触发挂单和合约仓位。WETH 换成 USDG；原生 ETH Gas 余额、USDG、Hyperliquid USDC 保留。其他链、其他池不操作；Hyperliquid 有其他币种持仓/挂单时停止，避免影响其他策略。退出合约使用限滑点、只减仓 IOC，可能产生吃单手续费，不承诺 maker 成交。
+
+顺序：对账未决操作 → 确认撤单终态 → 发现并退出真实 LP、领取手续费 → 按原始整数余额卖出全部 WETH → 按真实余仓平合约 → 连续两次核对空仓、零挂单、无未决交易和订单。IOC 部分成交只在前单终态明确后按新余仓有限补平；仍有余额或未知结果就停止，保留全部记录。
+
+退出过程写入 `manual_reset.json`。任何中断后普通 `run` 均被该标记拦住，必须重新运行同一脚本继续退出，不能误入新仓。验证完成后，原状态目录完整备份到同级 `<目录名>_reset_backup_<id>`，成功落盘后才清空活动文件，进程锁原地保留，维护标记最后移除。配置、`.env` 不修改。备份可能包含已签名交易，目录权限设为仅当前用户可访问，勿上传。
+
+退出日志为 `data/operator-logs/exit-reset.log.*`，旧 `run.log` 移到 `data/operator-logs/run-before-reset.log.*`，新实盘日志写入 `run.log`。新启动按首仓规则检查当前市场和资金条件，不代表一定立即建仓。失败时不清空记录、不重启；无需再次删除缓存。只想退出并清理、不想自动重启时，停止旧进程后执行 `./target/release/lp-maker --config config/local.toml reset-flat --execute`。
+
 ```bash
 # 文件状态、完整订单台账、最近启动对账结果；无需私钥
 cargo run --locked -- --config config/paper-200.toml status

@@ -719,14 +719,21 @@ impl Executor {
         .await
     }
     pub async fn swap(&self, sell_base: bool, amount: f64) -> Result<Value> {
+        self.swap_amount(sell_base, Some(amount)).await
+    }
+    /// 显式退出使用精确余额，避免 f64 换算留下几个 wei，或盲目增加数量造成超支。
+    pub async fn sell_all_base(&self) -> Result<Value> {
+        self.swap_amount(true, None).await
+    }
+    async fn swap_amount(&self, sell_base: bool, amount: Option<f64>) -> Result<Value> {
         let s = self.venue.snapshot().await?;
-        let (token_in, token_out, di, do_, expected) = if sell_base {
+        let (token_in, token_out, di, do_, rate) = if sell_base {
             (
                 self.venue.base,
                 self.venue.quote,
                 self.venue.cfg.base_decimals,
                 self.venue.cfg.quote_decimals,
-                amount * s.price,
+                s.price,
             )
         } else {
             (
@@ -734,12 +741,16 @@ impl Executor {
                 self.venue.base,
                 self.venue.cfg.quote_decimals,
                 self.venue.cfg.base_decimals,
-                amount / s.price,
+                1.0 / s.price,
             )
         };
         let balance = self.venue.balance(token_in, self.owner()).await?;
-        let input = super::bounded_amount(amount, di, balance)?;
+        let input = match amount {
+            Some(amount) => super::bounded_amount(amount, di, balance)?,
+            None => balance,
+        };
         ensure!(input > U256::ZERO, "zero swap");
+        let expected = super::units(input, di)? * rate;
         let min_out = self
             .venue
             .minimum_swap_output(token_in, token_out, input, s.block, expected, do_)

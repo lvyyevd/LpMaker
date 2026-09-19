@@ -82,6 +82,11 @@ enum Command {
         #[arg(long)]
         execute: bool,
     },
+    /// Exit this pool, sell base, cancel/close the configured hedge, then archive and reset state.
+    ResetFlat {
+        #[arg(long)]
+        execute: bool,
+    },
     /// Inspect persisted state and unresolved operations; no key required.
     Status,
     /// Fail unless recent completed strategy decisions prove the runner is healthy.
@@ -310,6 +315,7 @@ async fn main() -> Result<()> {
         },
         Command::Reconcile => print(engine::reconcile(&c, store).await?),
         Command::RearmEntry { execute } => print(engine::entry_rearm::request(c, store, execute).await?),
+        Command::ResetFlat { execute } => print(engine::reset::request(c, store, execute).await?),
         Command::Info { command } => {
             let result = match command {
                 InfoCommand::Assets => serde_json::to_value(hl.assets().await?)?,

@@ -46,6 +46,60 @@ struct Chain {
     position: Vec<U256>,
 }
 
+#[tokio::test]
+async fn manual_exit_sells_exact_base_integer_balance_without_float_dust() {
+    let mut c = Config::load("config/paper-200.toml").unwrap();
+    let base: Address = c.liquidity.base_token.parse().unwrap();
+    let router: Address = c.liquidity.swap_router.parse().unwrap();
+    let exact = U256::from(16_000_000_000_000_003_u64);
+    let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let shared = seen.clone();
+    let mock=Mock::start(move |req| {
+        Ok(match req["method"].as_str().unwrap() {
+            "eth_chainId"=>json!("0x1237"),
+            "eth_blockNumber"=>json!("0x100"),
+            "eth_getBlockByNumber"=>json!({"hash":"0xcanonical","timestamp":format!("0x{:x}",lp_maker::now_ms()/1000),"baseFeePerGas":"0x1"}),
+            "eth_getTransactionCount"=>json!(if shared.lock().unwrap().is_empty(){"0x0"}else{"0x1"}),
+            "eth_gasPrice"|"eth_maxPriorityFeePerGas"=>json!("0x1"),
+            "eth_estimateGas"=>json!("0x30d40"),
+            "eth_getBalance"=>json!("0xde0b6b3a7640000"),
+            "eth_getTransactionReceipt"=>shared.lock().unwrap().first().cloned().unwrap_or(Value::Null),
+            "eth_call"=>{
+                let data=hex::decode(req["params"][0]["data"].as_str().unwrap().trim_start_matches("0x")).unwrap();
+                if has(&data,"slot0()") {words(&[parse_sqrt("3953120541360100857610261").unwrap(),tick_word(-198122),U256::ZERO,U256::ZERO,U256::ZERO,U256::ZERO,U256::from(1)])}
+                else if has(&data,"liquidity()") {words(&[U256::from(100)])}
+                else if has(&data,"tickSpacing()") {words(&[U256::from(1)])}
+                else if has(&data,"balanceOf(address)") {assert_eq!(req["params"][0]["to"].as_str().unwrap().parse::<Address>().unwrap(),base);words(&[exact])}
+                else if has(&data,"allowance(address,address)") {words(&[U256::MAX])}
+                else {json!("0x")}
+            }
+            "eth_sendRawTransaction"=>{
+                let raw=hex::decode(req["params"][0].as_str().unwrap().trim_start_matches("0x")).unwrap();
+                let tx=TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap();assert_eq!(tx.to(),Some(router));
+                let outer=IRouter02::multicallCall::abi_decode(tx.input()).unwrap();
+                let swap=IRouter02::exactInputSingleCall::abi_decode(&outer.data[0]).unwrap();
+                assert_eq!(swap.params.amountIn,exact);assert_eq!(swap.params.tokenIn,base);
+                let hash=format!("{:#x}",keccak256(raw));
+                shared.lock().unwrap().push(json!({"transactionHash":hash,"blockNumber":"0x1","blockHash":"0xcanonical","status":"0x1","logs":[]}));
+                json!(hash)
+            }
+            other=>panic!("unexpected RPC {other}"),
+        })
+    }).await;
+    c.liquidity.rpc_url = mock.url.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let ex = Executor::with_signer(
+        liquidity::connect(c.liquidity).unwrap(),
+        store.clone(),
+        PrivateKeySigner::from_bytes(&B256::from([1_u8; 32])).unwrap(),
+    )
+    .unwrap();
+    ex.sell_all_base().await.unwrap();
+    assert!(store.pending().unwrap().is_none());
+    assert_eq!(seen.lock().unwrap().len(), 1);
+}
+
 /// End-to-end signed calldata test against a loopback node: swap, mint, restart, withdraw.
 /// The signer is a public fixed vector; no environment variables or external writes are used.
 #[tokio::test]
