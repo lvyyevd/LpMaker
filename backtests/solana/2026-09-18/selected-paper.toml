@@ -1,0 +1,85 @@
+mode = "paper"
+state_dir = "data/solana-sol-usdc-paper"
+poll_seconds = 15
+report_seconds = 60
+adapter_path = "adapters/solana/bridge.mjs"
+
+[solana]
+pool = "5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6"
+rpc_url_env = "LPMAKER_SOL_RPC_URL"
+grpc_url_env = "LPMAKER_SOL_GRPC_URL"
+grpc_token_env = "LPMAKER_SOL_GRPC_TOKEN"
+private_key_env = "LPMAKER_SOL_PRIVATE_KEY"
+require_grpc = true
+slippage_bps = 30
+max_transaction_fee_sol = 0.001
+priority_fee_microlamports = 10000
+min_native_sol = 0.03
+max_rent_sol = 0.12
+idle_timeout_seconds = 300
+
+[hyperliquid]
+http_url = "https://api.hyperliquid.xyz"
+ws_url = "wss://api.hyperliquid.xyz/ws"
+mainnet = true
+coins = [
+    "ETH",
+    "BTC",
+    "SOL",
+]
+hedge_coin = "SOL"
+private_key_env = "LPMAKER_SOL_HL_PRIVATE_KEY"
+leverage = 3
+cross_margin = false
+maker_wait_seconds = 15
+emergency_slippage_bps = 30
+
+[strategy]
+total_capital = 200.0
+lp_budget = 120.0
+hedge_collateral = 60.0
+reserve = 20.0
+inside_hedge_ratio = 0.5
+hedge_deadband_usd = 12.0
+max_drawdown = 0.05
+max_basis_bps = 100.0
+max_data_age_seconds = 60
+fast_drop_1h = 0.015
+vol_short_hours = 6
+vol_long_hours = 168
+vol_pause_ratio = 1.8
+vol_resume_ratio = 1.2
+ema_fast_hours = 20
+ema_slow_hours = 60
+resume_healthy_hours = 6
+cooldown_hours = 6
+recovery_fraction = 0.25
+recovery_step_hours = 4
+breakout_buffer = 0.01
+breakout_confirm_bars = 8
+decision_bar_seconds = 900
+hedge_release_buffer = 0.004
+
+[[strategy.layers]]
+name = "core"
+weight = 0.6666666666666666
+half_width = 0.025
+
+[[strategy.layers]]
+name = "satellite"
+weight = 0.3333333333333333
+half_width = 0.008
+
+[logging]
+directory = "data/logs/solana-sol-usdc"
+retained_files = 14
+level = "info"
+
+[websocket]
+heartbeat_seconds = 20
+heartbeat_timeout_seconds = 60
+idle_timeout_seconds = 300
+connect_timeout_seconds = 15
+write_timeout_seconds = 10
+reconnect_initial_ms = 1000
+reconnect_max_seconds = 30

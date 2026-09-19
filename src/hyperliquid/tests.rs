@@ -67,6 +67,13 @@ struct ExchangeState {
     next_mode: Option<String>,
     spot_state: Option<Value>,
     active_state: Option<Value>,
+    cloid_unknown: bool,
+    all_status_unknown: bool,
+    hide_open_orders: bool,
+    filled: bool,
+    status_script: std::collections::VecDeque<Value>,
+    after_cancel_status: std::collections::VecDeque<Value>,
+    order_queries: Vec<Value>,
 }
 struct Mock {
     url: String,
@@ -130,6 +137,7 @@ impl Mock {
                             }
                             "cancelByCloid" => {
                                 s.canceled = true;
+                                s.status_script = std::mem::take(&mut s.after_cancel_status);
                                 json!({"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}})
                             }
                             _ => panic!("unexpected mock exchange action: {kind}"),
@@ -158,8 +166,8 @@ impl Mock {
                                 json!({"assetPositions":positions,"withdrawable":collateral,"marginSummary":{"accountValue":collateral}})
                             }
                             "openOrders" => {
-                                if !s.submitted_id.is_empty() && !s.canceled {
-                                    json!([{"oid":42,"coin":"ETH"}])
+                                if !s.submitted_id.is_empty() && !s.canceled && !s.filled && !s.hide_open_orders {
+                                    json!([{"oid":42,"coin":"ETH","cloid":s.submitted_id,"sz":"0.002","origSz":"0.008","side":"A","limitPx":"2500"}])
                                 } else {
                                     json!([])
                                 }
@@ -188,8 +196,13 @@ impl Mock {
                                 s.active_state.clone().unwrap_or_else(|| json!({"user":USER,"coin":"ETH","leverage":{"type":"isolated","value":3}}))
                             }
                             "orderStatus" => {
-                                if q["oid"].as_str() == Some(s.submitted_id.as_str()) {
-                                    json!({"status":"order","order":{"status":if s.canceled {"canceled"} else {"open"},"order":{"oid":42,"cloid":s.submitted_id,"coin":"ETH","sz":"0.002","origSz":"0.008"}}})
+                                s.order_queries.push(q["oid"].clone());
+                                if let Some(response) = s.status_script.pop_front() {
+                                    response
+                                } else if s.all_status_unknown || (s.cloid_unknown && q["oid"].is_string()) {
+                                    json!({"status":"unknownOid"})
+                                } else if q["oid"].as_str() == Some(s.submitted_id.as_str()) || (q["oid"] == 42 && !s.submitted_id.is_empty()) {
+                                    json!({"status":"order","order":{"status":if s.filled {"filled"} else if s.canceled {"canceled"} else {"open"},"order":{"oid":42,"cloid":s.submitted_id,"coin":"ETH","sz":if s.filled {"0"} else {"0.002"},"origSz":"0.008"}}})
                                 } else {
                                     json!({"status":"unknownOid"})
                                 }
@@ -619,5 +632,227 @@ async fn direct_master_subaccount_and_vault_require_matching_authority() {
             Some("0x0000000000000000000000000000000000000002".into());
         assert!(super::auth::verify(&client, signer).await.is_err());
     }
+    assert!(mock.state.lock().unwrap().actions.is_empty());
+}
+
+#[tokio::test]
+async fn acknowledged_oid_is_used_when_cloid_index_is_missing() {
+    let mock = Mock::start().await;
+    mock.state.lock().unwrap().cloid_unknown = true;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let l = live(config(), store.clone(), &mock.url);
+    l.hedge(0.008, false).await.unwrap();
+    let s = mock.state.lock().unwrap();
+    assert_eq!(s.actions, ["order", "cancelByCloid"]);
+    assert_eq!(s.order_queries, [json!(42), json!(42)]);
+    assert!(
+        store
+            .read::<Orders>("orders.json")
+            .unwrap()
+            .unwrap()
+            .values()
+            .all(|o| o.terminal)
+    );
+}
+
+#[tokio::test]
+async fn current_open_order_recovers_missing_status_indexes_without_new_order() {
+    let mock = Mock::start().await;
+    mock.state.lock().unwrap().status_script = [
+        json!({"status":"unknownOid"}),
+        json!({"status":"unknownOid"}),
+    ]
+    .into();
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    live(config(), store.clone(), &mock.url)
+        .hedge(0.008, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        mock.state.lock().unwrap().actions,
+        ["order", "cancelByCloid"]
+    );
+    let audit = std::fs::read_to_string(dir.path().join("events.jsonl")).unwrap();
+    assert!(audit.contains("openOrders"));
+    assert!(store.pending().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn transient_absence_and_delayed_cancel_status_are_only_read_retried() {
+    let mock = Mock::start().await;
+    {
+        let mut s = mock.state.lock().unwrap();
+        s.hide_open_orders = true;
+        s.status_script = [
+            json!({"status":"unknownOid"}),
+            json!({"status":"unknownOid"}),
+        ]
+        .into();
+        s.after_cancel_status = s.status_script.clone();
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    live(config(), store.clone(), &mock.url)
+        .hedge(0.008, false)
+        .await
+        .unwrap();
+    let s = mock.state.lock().unwrap();
+    assert_eq!(s.actions, ["order", "cancelByCloid"]);
+    assert_eq!(s.order_queries.len(), 6);
+    assert!(
+        store
+            .read::<Orders>("orders.json")
+            .unwrap()
+            .unwrap()
+            .values()
+            .all(|o| o.status == "canceled")
+    );
+}
+
+#[tokio::test]
+async fn unresolved_acknowledged_order_retains_evidence_then_restart_reads_later_fill() {
+    let mock = Mock::start().await;
+    {
+        let mut s = mock.state.lock().unwrap();
+        s.all_status_unknown = true;
+        s.hide_open_orders = true;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let id;
+    {
+        let store = Arc::new(Store::open(dir.path()).unwrap());
+        let l = live(config(), store.clone(), &mock.url);
+        let error = l.hedge(0.008, false).await.unwrap_err();
+        assert!(crate::runtime::retryable(&error));
+        let orders = store.read::<Orders>("orders.json").unwrap().unwrap();
+        let o = orders.values().next().unwrap();
+        assert_eq!(o.oid, Some(42));
+        assert_eq!(o.status, "open");
+        assert!(!o.terminal);
+        id = o.cloid.clone();
+        assert!(store.read::<Value>("hedge_order.json").unwrap().is_some());
+        assert!(store.pending().unwrap().is_none()); // ACK was durably confirmed.
+        assert_eq!(mock.state.lock().unwrap().actions, ["order"]);
+        // Reproduce the old release's unknown record while retaining its accepted OID.
+        store
+            .update::<Orders>("orders.json", |ledger| {
+                ledger.get_mut(&id).unwrap().status = "unknown".into();
+                Ok(())
+            })
+            .unwrap();
+    }
+    {
+        let mut s = mock.state.lock().unwrap();
+        s.all_status_unknown = false;
+        s.cloid_unknown = true;
+        s.filled = true;
+    }
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let l = live(config(), store.clone(), &mock.url);
+    l.sync_orders(true).await.unwrap();
+    assert_eq!(l.portfolio().await.unwrap().short_base, 0.006);
+    assert_eq!(
+        store.read::<Orders>("orders.json").unwrap().unwrap()[&id].status,
+        "filled"
+    );
+    assert!(store.read::<Value>("hedge_order.json").unwrap().is_none());
+    assert_eq!(mock.state.lock().unwrap().actions, ["order"]);
+}
+
+#[tokio::test]
+async fn lost_ack_finds_cloid_in_open_orders_and_persists_oid_before_recovery_cancel() {
+    let mock = Mock::start().await;
+    mock.state.lock().unwrap().drop_exchange_reply = true;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let mut c = config();
+    c.hyperliquid.http_url = mock.url.clone();
+    let l = live(c.clone(), store.clone(), &mock.url);
+    assert!(l.hedge(0.008, false).await.is_err());
+    {
+        let mut s = mock.state.lock().unwrap();
+        s.drop_exchange_reply = false;
+        s.cloid_unknown = true;
+    }
+    engine::reconcile(&c, store.clone()).await.unwrap();
+    assert!(store.pending().unwrap().is_none());
+    let orders = store.read::<Orders>("orders.json").unwrap().unwrap();
+    assert_eq!(orders.values().next().unwrap().oid, Some(42));
+    l.sync_orders(true).await.unwrap();
+    assert_eq!(
+        mock.state.lock().unwrap().actions,
+        ["order", "cancelByCloid"]
+    );
+}
+
+#[tokio::test]
+async fn oid_response_for_another_cloid_blocks_without_cancel_or_replacement() {
+    let mock = Mock::start().await;
+    mock.state.lock().unwrap().status_script.push_back(json!({"status":"order",
+        "order":{"status":"open","order":{"oid":42,"cloid":"0x11111111111111111111111111111111"}}}));
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let error = live(config(), store.clone(), &mock.url)
+        .hedge(0.008, false)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("cloid mismatch"));
+    assert!(!crate::runtime::retryable(&error));
+    assert_eq!(mock.state.lock().unwrap().actions, ["order"]);
+    assert!(store.read::<Value>("hedge_order.json").unwrap().is_some());
+}
+
+#[tokio::test]
+async fn stale_open_status_after_cancel_is_not_treated_as_terminal() {
+    let mock = Mock::start().await;
+    let open = json!({"status":"order","order":{"status":"open","order":{"oid":42,"cloid":null}}});
+    mock.state.lock().unwrap().after_cancel_status = [open.clone(), open].into();
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    live(config(), store.clone(), &mock.url)
+        .hedge(0.008, false)
+        .await
+        .unwrap();
+    let s = mock.state.lock().unwrap();
+    assert_eq!(s.actions, ["order", "cancelByCloid"]);
+    assert_eq!(s.order_queries.len(), 4);
+    assert!(
+        store
+            .read::<Orders>("orders.json")
+            .unwrap()
+            .unwrap()
+            .values()
+            .all(|o| o.status == "canceled")
+    );
+}
+
+#[tokio::test]
+async fn unknown_cloid_never_adopts_an_unrelated_open_order() {
+    let mock = Mock::start().await;
+    {
+        let mut s = mock.state.lock().unwrap();
+        s.submitted_id = "0x22222222222222222222222222222222".into();
+        s.all_status_unknown = true;
+    }
+    let id = "0x11111111111111111111111111111111";
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    super::journal::prepare(
+        &store,
+        &json!({"type":"order","orders":[{"c":id}]}),
+        USER,
+        1,
+    )
+    .unwrap();
+    let client = signed_client(&config(), store.clone(), &mock.url);
+    let error = super::order_recovery::resolve(&client, &store, id, false)
+        .await
+        .unwrap_err();
+    assert!(crate::runtime::retryable(&error));
+    let ledger = store.read::<Orders>("orders.json").unwrap().unwrap();
+    assert_eq!(ledger[id].oid, None);
+    assert!(!ledger[id].terminal);
     assert!(mock.state.lock().unwrap().actions.is_empty());
 }

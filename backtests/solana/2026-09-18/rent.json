@@ -1,0 +1,10 @@
+{
+  "observed_utc": "2026-09-18T08:52:05.089622+00:00",
+  "source": "Solana mainnet getMinimumBalanceForRentExemption, SDK 1.9.14 position size",
+  "base_position_bytes": 8112,
+  "base_position_bins": 70,
+  "extra_bin_bytes": 112,
+  "base_position_lamports": 41859200,
+  "extra_bin_lamports": 568960,
+  "assumption": "Current schedule for initial feasibility, not historical rent PnL. Missing bin-array rent excluded; live simulation checks it."
+}

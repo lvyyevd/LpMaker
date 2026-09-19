@@ -2,3 +2,7 @@
 /data/
 .env
 *.key
+
+/adapters/solana/node_modules/
+.env.*
+/config/solana.local.toml

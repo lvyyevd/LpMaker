@@ -1,0 +1,89 @@
+{
+  "address": "5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6",
+  "name": "SOL-USDC",
+  "token_x": {
+    "address": "So11111111111111111111111111111111111111112",
+    "name": "Wrapped SOL",
+    "symbol": "SOL",
+    "decimals": 9,
+    "is_verified": true,
+    "holders": 3820662,
+    "freeze_authority_disabled": true,
+    "total_supply": 634298583.9927752,
+    "price": 106.17541139331594,
+    "market_cap": 62356535628.59186
+  },
+  "token_y": {
+    "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "name": "USD Coin",
+    "symbol": "USDC",
+    "decimals": 6,
+    "is_verified": true,
+    "holders": 5248202,
+    "freeze_authority_disabled": false,
+    "total_supply": 7629264585.133943,
+    "price": 0.9995110580126292,
+    "market_cap": 7625534317.345509
+  },
+  "reserve_x": "EYj9xKw6ZszwpyNibHY7JD5o3QgTVrSdcBp1fMJhrR9o",
+  "reserve_y": "CoaxzEh8p5YyGLcj36Eo3cUThVJxeKCs7qvLAGDYwBcz",
+  "token_x_amount": 12817.511711482,
+  "token_y_amount": 3794702.043874,
+  "created_at": 1711766862000,
+  "reward_mint_x": "11111111111111111111111111111111",
+  "reward_mint_y": "11111111111111111111111111111111",
+  "pool_config": {
+    "bin_step": 4,
+    "base_fee_pct": 0.04,
+    "max_fee_pct": 0.0,
+    "protocol_fee_pct": 5.0,
+    "collect_fee_mode": 0
+  },
+  "dynamic_fee_pct": 0.0008185,
+  "tvl": 5154095.209778933,
+  "current_price": 106.29343873904158,
+  "apr": 0.30083726446563996,
+  "apy": 199.339333811216,
+  "has_farm": false,
+  "farm_apr": 0.0,
+  "farm_apy": 0.0,
+  "volume": {
+    "30m": 490041.2946532077,
+    "1h": 963116.7360395596,
+    "2h": 2330661.4672001954,
+    "4h": 5100594.0604504505,
+    "12h": 19520477.98748572,
+    "24h": 41252288.58688432
+  },
+  "fees": {
+    "30m": 178.64872114735093,
+    "1h": 351.16003024268167,
+    "2h": 854.335204889439,
+    "4h": 1893.6481494227132,
+    "12h": 7345.686715805587,
+    "24h": 15505.439037053527
+  },
+  "protocol_fees": {
+    "30m": 19.76091770976291,
+    "1h": 38.71780946244251,
+    "2h": 94.486015641953,
+    "4h": 209.5030519019271,
+    "12h": 809.8761638845584,
+    "24h": 1709.7621098811564
+  },
+  "fee_tvl_ratio": {
+    "30m": 0.0034661509707542525,
+    "1h": 0.006813223581442988,
+    "2h": 0.01657585221298391,
+    "4h": 0.03674065131412144,
+    "12h": 0.142521362466656,
+    "24h": 0.3008372644656399
+  },
+  "cumulative_metrics": {
+    "volume": 25370564831.050285,
+    "fees": 11151909.504230589
+  },
+  "is_blacklisted": false,
+  "launchpad": "",
+  "tags": []
+}

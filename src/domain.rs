@@ -119,6 +119,16 @@ pub trait LiquidityExecutor: Send + Sync {
     async fn snapshot(&self) -> Result<PoolSnapshot>;
     async fn current_positions(&self) -> Result<Vec<LpPosition>>;
     async fn wallet_balances(&self) -> Result<(f64, f64)>;
+    /// 建仓换币前询问协议实际需要的基础币；默认保留原来的等值配比。
+    /// tick 间距较大的池可覆盖此方法，避免对齐后所需数量与 50/50 假设不同。
+    fn mint_base_requirement(
+        &self,
+        value: f64,
+        _width: f64,
+        snapshot: &PoolSnapshot,
+    ) -> Result<f64> {
+        Ok(value / 2.0 / snapshot.price)
+    }
     async fn mint_layer(&self, layer: &str, value: f64, width: f64) -> Result<()>;
     async fn increase_position(&self, position: &LpPosition, value: f64) -> Result<()>;
     async fn remove_position(&self, position: &LpPosition) -> Result<()>;

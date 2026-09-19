@@ -3,6 +3,7 @@ pub mod domain;
 pub mod engine;
 pub mod evm;
 pub mod hyperliquid;
+pub mod liquidity;
 pub mod logging;
 pub mod math;
 pub mod monitor;
@@ -18,3 +19,5 @@ pub fn now_ms() -> u64 {
         .expect("clock before epoch")
         .as_millis() as u64
 }
+
+pub mod solana;

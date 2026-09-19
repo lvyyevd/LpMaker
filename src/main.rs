@@ -4,8 +4,8 @@ use lp_maker::{
     config::{Config, Mode},
     domain::{Candle, HedgeVenue, LiquidityVenue, MarketFrame, PoolSnapshot},
     engine::{self, Paper},
-    evm::{UniswapV3, tx::Executor},
     hyperliquid::{Client, orders},
+    liquidity::uniswap_v3::tx::Executor,
     store::Store,
     strategy::Strategy,
 };
@@ -56,7 +56,7 @@ enum Command {
         #[command(subcommand)]
         command: InfoCommand,
     },
-    /// Robinhood/Uniswap V3 pool snapshots, event logs and positions.
+    /// Configured chain/pool snapshots, event logs and positions.
     Pool {
         #[command(subcommand)]
         command: PoolCommand,
@@ -413,7 +413,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Pool { command } => {
-            let venue = UniswapV3::new(c.liquidity.clone())?;
+            let venue = lp_maker::liquidity::connect(c.liquidity.clone())?;
             venue.validate().await?;
             match command {
                 PoolCommand::Snapshot => print(venue.snapshot().await?),
@@ -544,7 +544,7 @@ async fn main() -> Result<()> {
         }
         Command::Lp { execute, command } => {
             live(&c, execute)?;
-            let venue = UniswapV3::new(c.liquidity.clone())?;
+            let venue = lp_maker::liquidity::connect(c.liquidity.clone())?;
             venue.validate().await?;
             let ex = Executor::new(venue, store.clone())?;
             let result = match command {

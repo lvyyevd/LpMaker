@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "saved_ms": 1789713119728,
+  "mode": "live",
+  "strategy": {
+    "entry_history": "established",
+    "phase": "Paused",
+    "peak_equity": 388.419245,
+    "pause_since": 1789713119728,
+    "last_hour": 1789711199999,
+    "healthy_hours": 2,
+    "fraction": 0.25,
+    "last_scale": 1789713119000,
+    "last_decision_bar": 1988568,
+    "layers": {
+      "core": {"protected": false, "outside_side": 0, "outside_count": 0},
+      "satellite": {"protected": true, "outside_side": -1, "outside_count": 3}
+    }
+  },
+  "paper": null
+}

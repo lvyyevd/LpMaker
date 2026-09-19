@@ -1,0 +1,128 @@
+# Base WETH/USDC 0.3%：共用 Robinhood 策略参数，独立状态目录，默认仅模拟。
+# 实盘必须另设 state_dir，并使用独立的 Hyperliquid 主账户或子账户。
+# 200 USD paper-only example: 120 LP + 60 hedge collateral + 20 reserve.
+# This preset is for simulation; small residual live hedges remain subject to exchange minimums.
+# All thresholds are research defaults, not optimized or profit guarantees.
+mode = "paper"
+state_dir = "data/base-weth-usdc-3000-paper"
+poll_seconds = 15
+
+[hyperliquid]
+http_url = "https://api.hyperliquid.xyz"
+ws_url = "wss://api.hyperliquid.xyz/ws"
+mainnet = true
+coins = ["ETH", "BTC", "SOL"]
+hedge_coin = "ETH"
+private_key_env = "LPMAKER_BASE_HL_PRIVATE_KEY"
+# Account owner (NOT API/agent wallet). Required for authenticated live trading.
+# account = "0x..."
+# vault = "0x..."
+leverage = 3
+cross_margin = false
+maker_wait_seconds = 15
+emergency_slippage_bps = 30
+
+[liquidity]
+kind = "uniswap_v3"
+chain_id = 8453
+rpc_url = "https://base-rpc.publicnode.com"
+# 历史查询使用同链节点；可单独配置提供历史查询能力的节点。
+archive_rpc_url = "https://base-rpc.publicnode.com"
+ws_url = "wss://base-rpc.publicnode.com"
+# Optional public LP address for read-only monitoring; no private key needed.
+# owner = "0x..."
+nonce_refresh_seconds = 30
+pending_warn_seconds = 120
+pool = "0x6c561B446416E1A00E8E93E221854d6eA4171372"
+factory = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"
+position_manager = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1"
+swap_router = "0x2626664c2603336E57B271c5C0b26F421741e481"
+base_token = "0x4200000000000000000000000000000000000006"
+quote_token = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+base_decimals = 18
+quote_decimals = 6
+fee = 3000
+private_key_env = "LPMAKER_BASE_EVM_PRIVATE_KEY"
+confirmations = 12
+slippage_bps = 30
+deadline_seconds = 120
+max_gas_native = 0.003
+gas_fee_buffer_bps = 10000 # Fee cap: add 100% headroom; EIP-1559 does not pay the entire cap.
+gas_limit_buffer_bps = 2000 # Gas units: add 20%, rounded up.
+max_quote_age_seconds = 60
+
+[strategy]
+total_capital = 200.0
+lp_budget = 120.0
+hedge_collateral = 60.0
+reserve = 20.0
+inside_hedge_ratio = 0.0
+hedge_deadband_usd = 12.0
+max_drawdown = 0.05
+max_basis_bps = 100.0
+max_data_age_seconds = 60
+fast_drop_1h = 0.015
+vol_short_hours = 6
+vol_long_hours = 168
+vol_pause_ratio = 1.8
+vol_resume_ratio = 1.2
+ema_fast_hours = 20
+ema_slow_hours = 60
+resume_healthy_hours = 6
+cooldown_hours = 6
+recovery_fraction = 0.25
+recovery_step_hours = 4
+breakout_buffer = 0.01
+breakout_confirm_bars = 8
+decision_bar_seconds = 900
+hedge_release_buffer = 0.004
+
+[[strategy.layers]]
+name = "core"
+weight = 0.6666666666666666
+half_width = 0.08
+
+[[strategy.layers]]
+name = "satellite"
+weight = 0.3333333333333333
+half_width = 0.02
+
+
+[websocket]
+heartbeat_seconds = 20
+heartbeat_timeout_seconds = 60
+# Reconnect after 5 minutes without business data; pong does not reset this timer.
+idle_timeout_seconds = 300
+connect_timeout_seconds = 15
+write_timeout_seconds = 10
+reconnect_initial_ms = 1000
+reconnect_max_seconds = 30
+
+[monitoring]
+# 中文状态摘要每分钟打印；数据刷新独立进行。
+hyperliquid_interval_seconds = 60
+liquidity_interval_seconds = 60
+hyperliquid_refresh_seconds = 30
+liquidity_refresh_seconds = 15
+volume_window_seconds = 300
+backfill_blocks = 6000
+refresh_timeout_seconds = 45
+
+[logging]
+level = "info"
+directory = "data/logs/base-weth-usdc-3000"
+retained_files = 14
+
+
+[runtime]
+# Failed reads restart reconciliation; uncertain writes are never replayed.
+read_retry_seconds = 5
+observation_timeout_seconds = 45
+
+[storage]
+event_segment_bytes = 16777216
+event_retained_segments = 32
+terminal_orders_keep = 1000
+# Immutable terminal-order history: stop at this cap; never silently erase IDs.
+order_archive_max_bytes = 268435456
+min_free_bytes = 268435456

@@ -27,6 +27,7 @@ struct Chain {
     pending_external: bool,
     consumed_external: bool,
     original_wins: Option<String>,
+    l1_fee: u128,
 }
 impl Default for Chain {
     fn default() -> Self {
@@ -41,10 +42,14 @@ impl Default for Chain {
             pending_external: false,
             consumed_external: false,
             original_wins: None,
+            l1_fee: 100,
         }
     }
 }
 async fn server() -> (String, Arc<Mutex<Chain>>, tokio::task::JoinHandle<()>) {
+    server_for(4663).await
+}
+async fn server_for(chain_id: u64) -> (String, Arc<Mutex<Chain>>, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
     let shared = Arc::new(Mutex::new(Chain::default()));
@@ -63,7 +68,7 @@ async fn server() -> (String, Arc<Mutex<Chain>>, tokio::task::JoinHandle<()>) {
                     let mut error = None;
                     let mut drop_response = false;
                     let result = match req["method"].as_str().unwrap() {
-                        "eth_chainId" => json!("0x1237"),
+                        "eth_chainId" => json!(format!("0x{chain_id:x}")),
                         "eth_gasPrice" => json!(format!("0x{:x}", 58_182_000)),
                         "eth_maxPriorityFeePerGas" => {
                             if let Some(code) = s.priority_error {
@@ -82,7 +87,29 @@ async fn server() -> (String, Arc<Mutex<Chain>>, tokio::task::JoinHandle<()>) {
                         "eth_blockNumber" => json!("0x100"),
                         "eth_getBalance" => json!("0xde0b6b3a7640000"),
                         "eth_estimateGas" => json!("0xc350"),
-                        "eth_call" => json!("0x"),
+                        "eth_call" => {
+                            if req["params"][0]["to"].as_str().is_some_and(|a| {
+                                a.eq_ignore_ascii_case(
+                                    lp_maker::liquidity::chains::base::fees::ORACLE,
+                                )
+                            }) {
+                                let input = req["params"][0]["data"].as_str().unwrap();
+                                let l1_selector = format!(
+                                    "0x{}",
+                                    hex::encode(&keccak256("getL1FeeUpperBound(uint256)")[..4])
+                                );
+                                json!(format!(
+                                    "0x{:064x}",
+                                    if input.starts_with(&l1_selector) {
+                                        s.l1_fee
+                                    } else {
+                                        0
+                                    }
+                                ))
+                            } else {
+                                json!("0x")
+                            }
+                        }
                         "eth_getTransactionCount" => {
                             let advanced = s.mined.is_some()
                                 || s.consumed_external
@@ -198,6 +225,55 @@ async fn rising_base_fee_uses_type_two_cap_and_zero_tip_without_duplicate_nonce(
     assert_eq!(tx.nonce(), 207);
     assert_eq!(ex.nonce.next().await.unwrap(), 208);
     assert!(store.pending().unwrap().is_none());
+    server.abort();
+}
+
+#[tokio::test]
+async fn base_chain_fee_budget_blocks_l1_overrun_then_sends_one_recoverable_transaction() {
+    let (url, state, server) = server_for(8453).await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let mut c = Config::load("config/base.toml").unwrap();
+    c.liquidity.rpc_url = url.clone();
+    let ex = Executor::with_signer(
+        UniswapV3::new(c.liquidity.clone()).unwrap(),
+        store.clone(),
+        signer(),
+    )
+    .unwrap();
+    state.lock().unwrap().l1_fee = 2_000_000_000_000_000; // Headroom makes L1 alone exceed 0.003 ETH.
+    let (data, op) = approval(&ex);
+    assert!(
+        ex.send(ex.venue.quote, data, op)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("gas budget")
+    );
+    assert!(state.lock().unwrap().sent.is_empty());
+    assert!(store.pending().unwrap().is_none());
+    state.lock().unwrap().l1_fee = 100;
+    state.lock().unwrap().drop_response = true;
+    let (data, op) = approval(&ex);
+    assert!(ex.send(ex.venue.quote, data, op).await.is_err());
+    let hash = store.pending().unwrap().unwrap()["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(state.lock().unwrap().sent[0].1.chain_id(), Some(8453));
+    drop(ex);
+    drop(store);
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let ex = Executor::with_signer(
+        UniswapV3::new(c.liquidity).unwrap(),
+        store.clone(),
+        signer(),
+    )
+    .unwrap();
+    ex.retry_approval(&hash).await.unwrap();
+    assert!(store.pending().unwrap().is_none());
+    assert_eq!(state.lock().unwrap().sent.len(), 1);
+    assert_eq!(ex.nonce.next().await.unwrap(), 208);
     server.abort();
 }
 

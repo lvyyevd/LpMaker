@@ -1,3 +1,4 @@
+pub mod denomination;
 pub mod display;
 pub mod performance;
 pub mod volume;
@@ -5,8 +6,8 @@ use crate::{
     config::{Config, Mode},
     domain::{HedgeVenue, LiquidityVenue, LpPosition, Portfolio},
     engine::Paper,
-    evm::UniswapV3,
     hyperliquid::{Client, ws},
+    liquidity::uniswap_v3::UniswapV3,
     store::Store,
     stream::{self, Event, Protocol},
 };
@@ -76,7 +77,7 @@ fn interval(seconds: u64) -> tokio::time::Interval {
 }
 enum Refresh {
     Hyperliquid(Result<Value>),
-    Robinhood(Result<Value>),
+    Liquidity(Result<Value>),
     Volume(Result<(Value, volume::Volume)>),
 }
 
@@ -84,7 +85,7 @@ enum Refresh {
 /// A separate timer prints cached snapshots even while a slow refresh is in flight.
 pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<bool>) -> Result<()> {
     let hl = Client::new(c.hyperliquid.clone(), store.clone())?;
-    let venue = UniswapV3::new(c.liquidity.clone())?;
+    let venue = crate::liquidity::connect(c.liquidity.clone())?;
     let (hl_tx, mut hl_rx) = mpsc::channel(4096);
     let (evm_tx, mut evm_rx) = mpsc::channel(4096);
     let mut streams = JoinSet::new();
@@ -239,11 +240,12 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                     }
                 },
                 _=etimer.tick()=>{
-                    let report=json!({"time_ms":crate::now_ms(),"mode":c.mode,"max_data_age_seconds":c.strategy.max_data_age_seconds,"ws":eh,"ws_data_age_ms":eh.last_data_ms.map(|t|crate::now_ms().saturating_sub(t)),"snapshot":chain,
+                    let mut report=json!({"market":crate::liquidity::chains::labels(&c.liquidity),"time_ms":crate::now_ms(),"mode":c.mode,"max_data_age_seconds":c.strategy.max_data_age_seconds,"ws":eh,"ws_data_age_ms":eh.last_data_ms.map(|t|crate::now_ms().saturating_sub(t)),"snapshot":chain,
                         "snapshot_age_ms":chain["observed_ms"].as_u64().map(|t|crate::now_ms().saturating_sub(t)),"volume_age_ms":volume_report["as_of_ms"].as_u64().map(|t|crate::now_ms().saturating_sub(t)),"last_unconfirmed_swap":last_swap,"refresh_pending":ebusy,"last_refresh_error":eerr,"recent_volume":volume_report,"volume_refresh_pending":vbusy,"volume_error":volume_error});
-                    tracing::info!("\n{}",display::robinhood(&report));
-                    tracing::debug!(report=%report,"Robinhood LP status raw snapshot");
-                    if store.is_writable() {store.write("monitor_robinhood.json",&report)?;}
+                    denomination::normalize(&mut report, c.liquidity.chain_id == 4663);
+                    tracing::info!("\n{}",display::liquidity(&report));
+                    tracing::debug!(report=%report,"LP status raw snapshot");
+                    if store.is_writable() {store.write(crate::liquidity::chains::monitor_file(&c.liquidity),&report)?;}
                 },
                 _=erefresh.tick()=>{
                     if !ebusy {
@@ -251,7 +253,7 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                         let anchor=performance.positions.values().filter_map(|h|h.samples.back())
                             .filter(|sample|crate::now_ms().saturating_sub(sample.time_ms)<=c.strategy.max_data_age_seconds*1000)
                             .max_by_key(|sample|sample.block).map(|sample|(performance.identity.clone(),sample.block,sample.block_hash.clone()));
-                        jobs.spawn(async move { Refresh::Robinhood(match tokio::time::timeout(Duration::from_secs(cfg.monitoring.refresh_timeout_seconds),
+                        jobs.spawn(async move { Refresh::Liquidity(match tokio::time::timeout(Duration::from_secs(cfg.monitoring.refresh_timeout_seconds),
                             refresh_chain(&cfg,&v,&s,anchor)).await {Ok(v)=>v,Err(e)=>Err(e.into())}) });
                     }
                     if !vbusy {
@@ -266,14 +268,14 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                 r=jobs.join_next(), if !jobs.is_empty()=>{
                     match r.context("refresh task missing")?? {
                         Refresh::Hyperliquid(r)=>{hbusy=false;match r {Ok(v)=>{account=v;herr=None;},Err(e)=>{herr=Some(format!("{e:#}"));tracing::warn!(error=%e,"Hyperliquid account refresh failed; previous snapshot retained with its timestamp");}}},
-                        Refresh::Robinhood(r)=>{ebusy=false;match r {Ok(mut v)=>{
+                        Refresh::Liquidity(r)=>{ebusy=false;match r {Ok(mut v)=>{
                             let mut next=performance.clone();
                             match next.observe(&mut v,crate::now_ms(),c.strategy.max_data_age_seconds*1000,&holding_starts) {
                                 Ok(())=>{if store.is_writable() && c.mode==Mode::Live && v["positions_observed"]==true {store.write(performance::FILE,&next)?;}performance=next;},
                                 Err(e)=>{v["performance_error"]=json!(format!("{e:#}"));tracing::warn!(error=%e,"LP APR 计算暂停，等待有效快照");},
                             }
                             chain=v;eerr=None;
-                        },Err(e)=>{eerr=Some(format!("{e:#}"));tracing::warn!(error=%e,"Robinhood refresh failed; previous snapshot retained with its timestamp");}}},
+                        },Err(e)=>{eerr=Some(format!("{e:#}"));tracing::warn!(error=%e,"LP refresh failed; previous snapshot retained with its timestamp");}}},
                         Refresh::Volume(r)=>{vbusy=false;match r {Ok((v,vol))=>{volume_report=v;volume=vol;volume_error=None;if store.is_writable(){store.write("monitor_volume.json",&volume)?;}},Err(e)=>{volume_error=Some(format!("{e:#}"));tracing::warn!(error=%e,"volume refresh failed; LP price and position reporting continues");}}},
                     }
                 }

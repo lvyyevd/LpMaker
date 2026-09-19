@@ -215,7 +215,10 @@ pub fn observe(store: &Store, id: &str, response: &Value) -> Result<()> {
         if response["status"] == "order" {
             let row = &response["order"]["order"];
             ensure!(
-                row["cloid"].is_null() || row["cloid"] == id,
+                row["cloid"].is_null()
+                    || row["cloid"]
+                        .as_str()
+                        .is_some_and(|v| v.eq_ignore_ascii_case(id)),
                 "order cloid mismatch"
             );
             let oid = row["oid"].as_u64().context("order oid missing")?;
@@ -223,13 +226,21 @@ pub fn observe(store: &Store, id: &str, response: &Value) -> Result<()> {
                 o.oid.is_none_or(|old| old == oid),
                 "order oid changed unexpectedly"
             );
-            o.oid = Some(oid);
-            o.status = response["order"]["status"]
+            let status = response["order"]["status"]
                 .as_str()
-                .context("order status missing")?
-                .into();
+                .context("order status missing")?;
+            ensure!(
+                !o.terminal || o.status == status,
+                "terminal order status cannot regress"
+            );
+            o.oid = Some(oid);
+            o.status = status.into();
             o.terminal = terminal_status(&o.status);
         } else {
+            // 一次索引缺失不能抹掉已有回执/成交证据。原始响应仍写入审计日志。
+            if o.oid.is_some() || o.terminal {
+                return Ok(());
+            }
             o.status = "unknown".into();
             o.terminal = false;
         }
@@ -262,11 +273,7 @@ pub async fn refresh(client: &super::Client, store: &Store) -> Result<()> {
             "order ledger belongs to another account"
         );
         if !order.terminal {
-            observe(
-                store,
-                &order.cloid,
-                &client.order_status(json!(order.cloid)).await?,
-            )?;
+            super::order_recovery::resolve(client, store, &order.cloid, false).await?;
         }
     }
     Ok(())
@@ -281,18 +288,27 @@ pub fn managed_open_orders(store: &Store, open: &Value, coin: &str) -> Result<Ve
             "untracked exchange order; recorded but will not cancel/adopt automatically",
         )?;
         ensure!(
-            order.managed_hedge && row["coin"] == coin && !order.terminal,
+            order.managed_hedge && row["coin"] == coin,
             "non-strategy or inconsistent open order; startup blocked"
         );
+        if order.terminal {
+            return Err(crate::runtime::ReadUnavailable(
+                "exchange open orders lag a confirmed terminal order; retry reconciliation".into(),
+            )
+            .into());
+        }
         ids.push(order.cloid.clone());
     }
-    ensure!(
-        ledger
-            .values()
-            .filter(|o| !o.terminal)
-            .all(|o| ids.contains(&o.cloid)),
-        "local unresolved order absent from exchange open orders; retry reconciliation"
-    );
+    if !ledger
+        .values()
+        .filter(|o| !o.terminal)
+        .all(|o| ids.contains(&o.cloid))
+    {
+        // 两次只读快照之间可能成交/撤销，也可能索引延迟；重新核对而不是推断终态。
+        return Err(crate::runtime::ReadUnavailable(
+            "local unresolved order absent from exchange open orders; retry reconciliation without new orders".into(),
+        ).into());
+    }
     Ok(ids)
 }
 pub fn compact(store: &Store) -> Result<()> {

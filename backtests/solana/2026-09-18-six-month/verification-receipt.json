@@ -1,0 +1,19 @@
+{
+  "started_utc": "2026-09-18T10:08:33+00:00",
+  "finished_utc": "2026-09-18T10:38:24.080446+00:00",
+  "elapsed_minutes": 29.851340766666667,
+  "did_run_ten_hours": false,
+  "stopping_reason": "User allowed early finish if a profitable LP candidate is found. A positive six-month historical model was found; this is not evidence of stable or live profitability. Independent final62d and hourly doubled-cost checks are negative.",
+  "rust_tests_passed": 170,
+  "cargo_fmt": "passed",
+  "clippy_all_targets_deny_warnings": "passed",
+  "release_build": "passed",
+  "public_paper_run": "passed; no positions opened because trend confirmation pending",
+  "public_paper_restart": "passed; same checkpoint, no duplicate deployment",
+  "public_rpc": "https://solana-rpc.publicnode.com",
+  "grpc_in_public_test": false,
+  "triton_authenticated_verification": "pending full endpoints",
+  "real_transactions_broadcast": 0,
+  "private_keys_read": false,
+  "original_evm_strategy_state_config_changes_in_this_task": false
+}

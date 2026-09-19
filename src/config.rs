@@ -165,8 +165,11 @@ impl Default for WebSocketConfig {
 pub struct MonitoringConfig {
     /// Human-readable status printing only; independent of observation refreshes.
     pub hyperliquid_interval_seconds: u64,
+    // 旧字段名继续序列化，避免旧配置/工具失效；新链可使用不带链名的别名。
+    #[serde(alias = "liquidity_interval_seconds")]
     pub robinhood_interval_seconds: u64,
     pub hyperliquid_refresh_seconds: u64,
+    #[serde(alias = "liquidity_refresh_seconds")]
     pub robinhood_refresh_seconds: u64,
     pub volume_window_seconds: u64,
     pub backfill_blocks: u64,
@@ -435,6 +438,13 @@ impl Config {
             ensure!(
                 self.hyperliquid.account.is_some(),
                 "live requires Hyperliquid account owner address"
+            );
+        }
+        crate::liquidity::chains::validate_pool(&self.liquidity)?;
+        if let Some(pool) = crate::liquidity::chains::pool(&self.liquidity) {
+            ensure!(
+                self.hyperliquid.hedge_coin == pool.hedge_coin,
+                "pool base asset must match Hyperliquid hedge coin"
             );
         }
         Ok(())

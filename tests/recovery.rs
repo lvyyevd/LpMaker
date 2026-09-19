@@ -389,6 +389,50 @@ fn unknown_status_and_unknown_ack_remain_unresolved() {
 }
 
 #[test]
+fn missing_query_cannot_erase_ack_or_regress_terminal_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(dir.path()).unwrap();
+    prepared(&s, true);
+    journal::acknowledged(
+        &s,
+        &action(),
+        &json!({"status":"ok","response":{"data":{"statuses":[{"resting":{"oid":42}}]}}}),
+    )
+    .unwrap();
+    assert!(journal::observe(&s, ID, &json!({"status":"unknownOid"})).is_err());
+    let order = &s.read::<Orders>("orders.json").unwrap().unwrap()[ID];
+    assert_eq!(order.status, "open");
+    assert_eq!(order.oid, Some(42));
+    assert_eq!(order.exchange["resting"]["oid"], 42);
+    journal::observe(&s, ID, &status("filled", "0")).unwrap();
+    assert!(journal::observe(&s, ID, &json!({"status":"unknownOid"})).is_err());
+    assert!(journal::observe(&s, ID, &status("open", "0.05")).is_err());
+    assert!(s.read::<Orders>("orders.json").unwrap().unwrap()[ID].terminal);
+    assert_eq!(
+        s.read::<Orders>("orders.json").unwrap().unwrap()[ID].status,
+        "filled"
+    );
+}
+
+#[test]
+fn inconsistent_order_snapshots_retry_but_untracked_orders_still_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(dir.path()).unwrap();
+    prepared(&s, true);
+    journal::observe(&s, ID, &status("open", "0.03")).unwrap();
+    let error = journal::managed_open_orders(&s, &json!([]), "ETH").unwrap_err();
+    assert!(lp_maker::runtime::retryable(&error));
+    journal::observe(&s, ID, &status("filled", "0")).unwrap();
+    let error =
+        journal::managed_open_orders(&s, &json!([{"oid":42,"coin":"ETH"}]), "ETH").unwrap_err();
+    assert!(lp_maker::runtime::retryable(&error));
+    assert!(s.read::<Orders>("orders.json").unwrap().unwrap()[ID].terminal);
+    let error =
+        journal::managed_open_orders(&s, &json!([{"oid":999,"coin":"ETH"}]), "ETH").unwrap_err();
+    assert!(!lp_maker::runtime::retryable(&error));
+}
+
+#[test]
 fn startup_report_and_concurrent_updates_are_durable() {
     let dir = tempfile::tempdir().unwrap();
     let s = Arc::new(Store::open(dir.path()).unwrap());
@@ -520,7 +564,7 @@ async fn expired_unknown_order_keeps_pending_and_blocks_replay() {
     assert!(s.begin(json!({"venue":"another"})).is_err());
     assert_eq!(
         s.read::<Orders>("orders.json").unwrap().unwrap()[ID].status,
-        "unknown"
+        "prepared" // 查询暂缺不能抹掉原始意图，也不能证明从未提交。
     );
     server.abort();
 }

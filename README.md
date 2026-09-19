@@ -1,6 +1,8 @@
 # LpMaker
 
-Rust 浓缩流动性管理与永续合约对冲项目。当前接入 **Robinhood Chain 的 Uniswap V3 WETH/USDG 0.01% 池**，使用 **Hyperliquid ETH 永续**对冲。Hyperliquid 连接器也支持动态发现和交易其他原生永续代币。
+Rust 浓缩流动性管理与永续合约对冲项目。当前接入 **Robinhood Chain 的 Uniswap V3 WETH/USDG 0.01% 池**及 **Base 的 Uniswap V3 WETH/USDC 0.3% 池**，共用策略并使用 **Hyperliquid ETH 永续**对冲。Hyperliquid 连接器也支持动态发现和交易其他原生永续代币。
+
+Base 使用独立的 `config/base.toml`，默认模拟。链/池模块、运行命令、双实例账户隔离以及 Robinhood 旧状态重启说明见 [Base 接入文档](docs/base.md)。
 
 默认 `paper`。本项目创建和验证期间没有读取真实私钥、下单、授权代币或发送链上交易。
 
@@ -142,10 +144,13 @@ EVM nonce 按钱包和链持久化，每 30 秒刷新 `latest/pending`；每次�
 src/domain.rs           平台无关的行情、LP、仓位、决策及能力接口
 src/strategy/           纯策略与指标；不访问网络、不签名
 src/hyperliquid/        信息、WebSocket、订单精度、签名、合约操作
-src/evm/               通用 EVM RPC、V3 ABI、事件与交易执行
-src/engine.rs           paper / live 编排与恢复
+src/evm/               通用 EVM RPC、费用、nonce 与旧导入兼容层
+src/liquidity/chains/   不同链的部署信息，每条链下 pools/ 按池拆分
+src/liquidity/uniswap_v3/ 共用 V3 读取、报价、ABI 与交易执行
+src/engine/            mod.rs 运行恢复、live.rs 实盘、paper.rs 模拟
 src/store.rs            原子状态、互斥执行、日志、未完成操作
-config/robinhood.toml   当前池和默认策略配置
+config/robinhood.toml   原 Robinhood 默认模拟配置
+config/base.toml        Base WETH/USDC 独立模拟配置
 ```
 
 同协议的新 Ethereum/L2 部署可复用 V3 适配器，配置链 ID、RPC、池、工厂、NFPM、SwapRouter02、代币精度及对应对冲币。启动时仍须验证链上实际部署。非 V3 平台实现 `LiquidityVenue` 与 `LiquidityExecutor` 并在启动装配处注册；无需把协议 ABI 或 NFT 概念引入策略。V4、其他 AMM 的仓位/费用模型不同，不能仅改地址套用 V3。
@@ -159,3 +164,18 @@ cargo fmt --all -- --check
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 ```
+
+## Solana / Meteora DLMM
+
+新增独立 `lp-maker-solana`，目标 SOL/USDC 池 `5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6`，对冲继续使用 Hyperliquid。配置、Solana 签名 journal 和状态目录与 EVM 分开；原 `lp-maker` 的命令不变。
+
+- [接入、运行和重启说明](docs/solana.md)
+- [最近 30 天参数比较与数据限制](backtests/solana/2026-09-18/REPORT.md)
+- [默认模拟配置](config/solana.toml)
+
+当前回测未能证明实际个人 LP 费覆盖损耗；默认仅模拟。服务商完整 RPC/gRPC 地址未提供，真实服务联调和完整 swap 模拟仍待完成，不能把本地测试当成实盘验收。
+# SOL 六个月趋势过滤候选
+
+新增可选的 `config/solana-regime.toml`，在独立 Solana Rust 策略模块中实现下降趋势/大波动退出、趋势确认入场、越界退出和持久化冷却。默认 paper，原 EVM 和原 Solana 配置行为保持不变。
+
+40% 假设 LP 手续费 APR 下，六个月真实双市场小时模型仅小幅盈利；后段独立测试和双倍成本检查未通过，不能视为稳定盈利策略。见 [运行与模块说明](docs/solana-regime.md) 和 [可复算研究报告](backtests/solana/2026-09-18-six-month/REPORT.md)。

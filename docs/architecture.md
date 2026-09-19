@@ -1,5 +1,37 @@
 # 架构与执行语义
 
+## 代码导航
+
+```text
+src/
+  strategy/                       共用纯状态机与指标，不包含链和合约地址
+  engine/
+    mod.rs                        启动、恢复、决策循环与原配置指纹
+    live.rs                       实盘 LP/对冲串行编排
+    paper.rs                      模拟资金账本
+  liquidity/
+    mod.rs                        协议接入工厂
+    chains/
+      robinhood/pools/weth_usdg.rs Robinhood 已有池
+      base/pools/weth_usdc.rs      Base 新池
+      base/fees.rs                Base L1/operator 费用
+    uniswap_v3/
+      mod.rs                      池/NFT/手续费读取及合约校验
+      mint.rs                     tick 对齐配比与余额约束
+      quote.rs                    链上 Quoter 报价
+      tx.rs                       授权、换币、mint、increase、撤出
+      approval_recovery.rs        原 nonce 授权恢复
+      abi.rs / events.rs          协议 ABI 与事件
+  evm/                            共用 RPC、nonce、费用估算及旧导入兼容层
+  hyperliquid/                    共用行情、账户、签名、挂单和订单恢复
+  monitor/                        共用监控、持仓时间、APR、币种显示
+  recovery.rs / store.rs           持久化与原检查点格式
+```
+
+新增同协议池时，在对应链的 `pools/` 下加定义和独立配置，在 registry 登记并补充链上身份/执行测试；不要复制策略状态机。新增链时另加部署与链特有费用模块。新增协议时实现 `LiquidityVenue` / `LiquidityExecutor`，并在接入工厂及监控入口注册；当前观察接口仍针对 V3，需要随新协议增加对应适配，不能把任意协议仅改 `kind` 后当作 V3 使用。
+
+链/池模块的中文注释说明部署事实，执行模块注释说明何时持久化、为什么不能重发以及 Base 与旧链的兼容边界。[Base 接入及升级说明](base.md) 给出具体命令。
+
 ```mermaid
 flowchart TD
     A[Hyperliquid HTTP / WebSocket] --> C[MarketFrame / Portfolio]
@@ -62,3 +94,16 @@ flowchart TD
 `reconcile` 不会对不确定的存款/保证金结果作成功假设；此类无法确定的写操作保持阻塞。对于仍未上链的 EVM 交易，按原哈希等待，nonce 替换、gas bump 或手工取消需要额外核对，不在本版自动化范围内。
 
 实盘启动会先自动对账；明确属于策略的遗留对冲挂单会撤销剩余委托，再以实际持仓计算新目标。未知/手工订单、未知订单状态、缺失 NFT 映射均阻止自动继续。恢复不会清除回撤停机状态。详见 [状态持久化与启动对账](recovery.md)。
+
+## Solana 边界
+
+`src/solana/` 与 `src/liquidity/uniswap_v3/` 平行，不借用 EVM nonce 或 V3 库存公式。`lp-maker-solana` 使用独立配置/检查点；协议指令与账户解码交给 `adapters/solana/` 固定版本官方 Meteora SDK。Rust 在任何广播前持久化原签名及 wire transaction，未知结果阻止重新签名。
+
+原 `Live` 的 Hyperliquid 挂单、撤单和未决恢复代码抽至 `src/hyperliquid/hedge.rs`，只依赖 StrategyConfig、HL Client 和 Store。EVM 入口委托该模块，调用顺序和交易阈值不变。原 `Strategy` 源码未修改，Solana 的 bin 范围、资金配比和执行生命周期独立处理。详见 [Solana 文档](solana.md)。
+## Solana 可选趋势策略与研究模块
+
+`solana::regime` 是纯 Rust 的可选策略：已闭合小时线产生趋势/波动信号，实时价格触发急跌与越界退出。只有 Solana 配置中的 `[regime]` 才启用；不调用或改变 EVM 的 `Strategy::evaluate`。
+
+`solana::research::{data, simulation, search, verification}` 分别承担历史数据验证、离散 bin 库存和 APR 现金流、参数筛选、细粒度压力测试。研究收益假设不进入实盘账户账本。运行器和研究调用相同的 `regime::evaluate_with_signals`，研究可缓存只依赖过去闭合 K 线的信号。
+
+新策略参数加入 Solana 身份指纹。未启用时指纹与旧版本相同；启用时必须使用独立状态目录，不能误接管已有 SOL、Ethereum 或 L2 仓位。持续使用原 Solana 签名日志和 Hyperliquid cloid 核对机制。

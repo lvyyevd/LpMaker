@@ -1,0 +1,17 @@
+[
+  {
+    "width": 0.15,
+    "hedge_ratio": 0.25,
+    "cooldown_hours": 72,
+    "regime": {
+      "ema_entry_hours": 48,
+      "ema_exit_hours": 144,
+      "momentum_hours": 168,
+      "min_momentum": 0.1,
+      "max_hourly_vol": 0.012,
+      "max_bar_range": 0.05,
+      "exit_buffer": 0.005,
+      "entry_confirm_hours": 6
+    }
+  }
+]

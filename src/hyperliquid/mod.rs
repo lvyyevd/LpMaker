@@ -1,6 +1,8 @@
 pub mod account;
 pub mod auth;
+pub mod hedge;
 pub mod journal;
+pub(crate) mod order_recovery;
 pub mod orders;
 pub mod signing;
 pub mod ws;

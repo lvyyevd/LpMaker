@@ -1,0 +1,1833 @@
+{
+  "data": {
+    "pool": "5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6",
+    "start_ms": 1787126400000,
+    "end_ms": 1789718400000,
+    "end_exclusive_utc": "2026-09-18T08:00:00Z",
+    "retrieved_utc": "2026-09-18T08:52:02.913578+00:00",
+    "sources": [
+      "https://dlmm.datapi.meteora.ag",
+      "https://api.hyperliquid.xyz/info"
+    ],
+    "quality": {
+      "pool_5m": {
+        "rows": 8640,
+        "missing": 0,
+        "first": 1787126400,
+        "last": 1789718100
+      },
+      "hl_5m": {
+        "rows": 4995,
+        "missing": 3645,
+        "first": 1788219900000,
+        "last": 1789718100000
+      },
+      "hl_1h": {
+        "rows": 912,
+        "missing": 0,
+        "first": 1786435200000,
+        "last": 1789714800000
+      },
+      "fee_zero_with_volume": 0,
+      "fee_rows": 8640,
+      "fee_missing_vs_ohlcv": 103,
+      "funding_rows": 720
+    },
+    "missing_data": "No historical per-bin liquidity ownership or maker order queue available; personal LP fees and maker fills cannot be measured exactly.",
+    "raw_sha256": {
+      "fees_1787126400.json": "1e58747bc8b0eafbc4599fca328cc59a0fdd1938288b08590db325817a41b1e3",
+      "fees_1787148000.json": "8a32f6aa5a92f3e7283517153436be6ff973254a4d7332d80211184ea70f5e46",
+      "fees_1787169600.json": "37e230e272f0dc05d11a7087e6d04fe94fccfb3291b89b853f0f815711970fe7",
+      "fees_1787191200.json": "c211f9d3c0d51d6a01a16c3909eefa75c4769f5469e677f361b1e106a54c5e5d",
+      "fees_1787212800.json": "0d7762b54f87d970bcec9255424f82dbace1fbde07cf4f3819e9c62c10863315",
+      "fees_1787234400.json": "34f4b8eee83a7bfc9c86639fec7c72584cd1c58c3a80eb035a4f0261e20d6cba",
+      "fees_1787256000.json": "5282197b74b5a90d976b77a3929db8f200ef25990050ab527b0de42119aa8d3f",
+      "fees_1787277600.json": "e698681c03fcc2d6b495524c0d13fdd9f9ef7454ae064f158e936c2c7fcb64b2",
+      "fees_1787299200.json": "af7d59ac629cf9b668243a90100ec47524e3ed004b02693e38ebd52316e45df8",
+      "fees_1787320800.json": "846084f8f61b9b25aceb54a39884fd58ae847caf19048995b365d1a5ef889be0",
+      "fees_1787342400.json": "7001e80a714486fd7ac38a10671f3f8d5f65eac3025466e4050030801191ae45",
+      "fees_1787364000.json": "cdc34f5b123c0d9c74d499e4547200ef519808135e09dd22b68f130c057b3506",
+      "fees_1787385600.json": "70a2f32df219e27faf6e4ca71bcf95d63979708b4fe4224d0593149907e012d1",
+      "fees_1787407200.json": "a4e21cc00d5f7df785e5679c10065fda167820ea9ca291dbbfcff4e7402984bc",
+      "fees_1787428800.json": "4f715c66c010d598a89a4525d2c829884100323afc16bea024626800e2bc3d26",
+      "fees_1787450400.json": "2459858e376835d77cbb443d69c59c7b9b3cbded4e3a4c3cae5ffd658f96b793",
+      "fees_1787472000.json": "b645ae8efadb70f3e7c00137f90e8b8227c0ed8e26f06342424eeb0862f37918",
+      "fees_1787493600.json": "31e2e8453e7e1a7f42e1989e20c45cb33925c94c5e486d71c1a31eb9010b9767",
+      "fees_1787515200.json": "8ab729b5d4adffb1c827eb826c8dd153ef91cc815fc90cacf3203cdefcf94e48",
+      "fees_1787536800.json": "2d524f87d1313832fb87453023771f9c321138b019083d896e807553974247f1",
+      "fees_1787558400.json": "7a163f7278e8538e8cdee4cf91597737e875203ca2fe6c8e92fde5f273f9267b",
+      "fees_1787580000.json": "d70b80698467d229a92bfc3691a0cf3ac1a104f82419d8261e3233b9ad0f852b",
+      "fees_1787601600.json": "2e10e30d3ac8c18e7704b701484750d19a944992979a3b20a6ccfaee5253e8f3",
+      "fees_1787623200.json": "d26d65378393a5950d6f2f7f80c374ec9be5dca14c1efe28e25aaa744133ff08",
+      "fees_1787644800.json": "d045adc5353826c6bb62db790b462aeb8eb4b3a3fbd62227112f10759ecf6da9",
+      "fees_1787666400.json": "413ded7d749e0129bc5291ee4070282130d62cf47302f17690c66cd4b3a8d1da",
+      "fees_1787688000.json": "6d45029de32183cd53dc2a75a40770a4a1e2e08c2e880bdd502310558b20f2c6",
+      "fees_1787709600.json": "6aa732f4516aad31673e61444a17bc546c08aab29b5c262fcb7406382bbd5efe",
+      "fees_1787731200.json": "e2fc97b7e0f5dacd74f65b3c670dd10599b37febbe4d2531b87b5a2cc807f1a4",
+      "fees_1787752800.json": "bbe989a304939be88fdcbdcddbece554b7c3b0d2da8bb127836e270cf28e0841",
+      "fees_1787774400.json": "df843f0ff9d14bf76ecd4e3c1328e0de0d732060e390fabc23f36e50aed3f60e",
+      "fees_1787796000.json": "7fbad9022794c4ccfb7ace85ace43776d0d9dd2a4489f9f29377bc82ca749ab5",
+      "fees_1787817600.json": "7ebaff032e9f9db23adf162152c67c184e8962b70c6b78a93f05dd724c94cd0f",
+      "fees_1787839200.json": "d1d70b713b026dc6ff32638c1b64f8c8f508178555fcf85d77df42027b3d5841",
+      "fees_1787860800.json": "af19b79414c37ea12e0d860c6cc7c369b7d53c4a642d843da3d648d97d99203b",
+      "fees_1787882400.json": "85475de57e2f363e3878f976a97f5c2966fa68fc5ceffcf7c0bed11f46ed2ea1",
+      "fees_1787904000.json": "b26198b855fb4ca1c2bec7731cbfd5e3cfa6c5dd4f9470c17ffeb9c807825511",
+      "fees_1787925600.json": "24536c6fdd73402e6c170160c9d2a521c0d65259ff5b4dd532e98a57d7b1140a",
+      "fees_1787947200.json": "824c9769defc87104085ebfe4961fadcc50590781d9fe095ed60c41886643927",
+      "fees_1787968800.json": "185b895fc32379c4c01b8ef43fa5abc887805fb92aa56cb1a0c50fa01cdb7361",
+      "fees_1787990400.json": "3f525f7cda0860710437750e178dcae7ffb07e4a6533efd351726503a1c441e7",
+      "fees_1788012000.json": "0a130b1d47005fde9456546d02eb44881924af14569494f94f1c5e7726786abd",
+      "fees_1788033600.json": "784779c0fe64fdb1ab25627722257d7e6c31d2fd511747e106bb80358959f0af",
+      "fees_1788055200.json": "4b2a354c9ca1ba82a6f62ce50a6d1bdc244613aa5ccae0d20b3d5c6773b68bda",
+      "fees_1788076800.json": "f0fd13de6e7c4e9f0ffef0636684f91c4dda9e8bbe2124b82dc138cf5ed23e4a",
+      "fees_1788098400.json": "275d06cc24f68e922499b574e9a4f77476d7781a036cc4e8ec7d8eb3baec7199",
+      "fees_1788120000.json": "3bf868a7e36b91d40aa83d32d129298114aa92aa0a963208187c3e3c1de0004d",
+      "fees_1788141600.json": "705fb0f60b9943338ca2b1c6d8d93ecc6f3d032ba66bb830924958331c7db213",
+      "fees_1788163200.json": "5dfdddd812ec23298fd4f58e7306eb86315c3918bb2c3a0dcc0ec979dda1d02c",
+      "fees_1788184800.json": "85b1d95afd500947684fcdf616141068237f8df88e6139309e2130f9118c47f1",
+      "fees_1788206400.json": "84dd5991733e1738115a3062a57fb37d6a59ef5a3eedb3a32e5d24a0051befb2",
+      "fees_1788228000.json": "c9b92891f0554bd21033fbd88d86710d9a1b8272fa88acbee7c6c61067c6e6f9",
+      "fees_1788249600.json": "201e66c4ad7068aa81473d3410b768184125b131c9ab35f94fdb1e8c3f0f6c32",
+      "fees_1788271200.json": "08b97aa881d51c81696fa3f3e74e1010bed3575724e9e0b000c02ba35dbbf7f1",
+      "fees_1788292800.json": "731c9b5a9dddc00d47865b7ce38ccae3bc9663ed7fe93d4982604ed9cb56c6c4",
+      "fees_1788314400.json": "b1a4d66b145bd0cbbbe633ebae03e8df82e0e62003f5d41021a2e90efb4b5746",
+      "fees_1788336000.json": "1636ca5ff4ee39883c6550a7e9385de0ca2e30c09847660b4e9285bd160e8ce1",
+      "fees_1788357600.json": "10c1844e8768149ca4beb09dc27f3f124b255734d5ba768c1a2cf022c13883a5",
+      "fees_1788379200.json": "dc26ea7f46a1b961dd89893da385a2cd3637736d1b2d4722727168ae3fc6a758",
+      "fees_1788400800.json": "047bb10cf9abac98dcb5b92f19d7d4d9beffd9ccc504d49b24132f4c81266221",
+      "fees_1788422400.json": "36eae5c87b91af5eec17d27a1da41ab3e48e3e3278fa82c26250257ff0f20c79",
+      "fees_1788444000.json": "2bb0c9b91fba9f4c71f3a94875fd59089041d74d60fd0681d1641d85e5780952",
+      "fees_1788465600.json": "aca63b7c96589259c896c0ea88a13b68b4c410678764da921cd438d76ef2eb93",
+      "fees_1788487200.json": "19ebbbdd72cae200d4ee0230fa4c8a84916c388f4334bcf2a74f186576a825f3",
+      "fees_1788508800.json": "4ede028d8e72971aa942a56e5b878681afabd25714e1a04c822dbd3e41482b42",
+      "fees_1788530400.json": "41e0196e2fedbe5dd9eb96dc7e36a890c0603f1f923cfc2bdb9ed5a51a88aca9",
+      "fees_1788552000.json": "9d5ea9ed927a91cdf74350c19ab7eb12a709366d87a021635f94c6558dd24d55",
+      "fees_1788573600.json": "8c2a9d37b166989f6a5dcab2f63a690a696dedfcd2987229301ee838a4c82210",
+      "fees_1788595200.json": "6c160f522f83f7dd9d90b571546fbda4c5661ebcae5b79042c0fdebb4370cefe",
+      "fees_1788616800.json": "b264c2b8e4d0854c9632d7604eef93a78c7cfbf93a085acac4c2967b1eb9e597",
+      "fees_1788638400.json": "af7f09dd1cd95281681f79e866ee35448cf04fceb62ef5abb61baa6f636aff4d",
+      "fees_1788660000.json": "af5a7a957756f8abead0a8b06257e13aae4166959d1a3e8e556ca67807c4f4f7",
+      "fees_1788681600.json": "3e19540f1e04b0e74f93f897bf534e2bf091b4c7c7da5cc7051027ac7a82013a",
+      "fees_1788703200.json": "31a3e9c2decbc8fd3cce9dc8dabbce2024a8e56321bd2895342f9fd688426a05",
+      "fees_1788724800.json": "d83155606dbc12c8a12bb79103a43aa80d8f9cbfe659d3e4e0115db88730c9d3",
+      "fees_1788746400.json": "567458b5769efd3775e0a86649f2404618369607216f94b0b69f2512d16694c0",
+      "fees_1788768000.json": "f35680eafe5064952b4c6cef2ba5eb7bdfb8f8c3fa261441509fd42e5a8d453a",
+      "fees_1788789600.json": "9e4d51bd18aa3ae9b45f00f8ef3dc89a53d0538d1ed3b7bbf093dcef47c5d750",
+      "fees_1788811200.json": "a18f7498f3ece63ff51e687566a91956eb87a14f205eeb14416495fa1b7dc326",
+      "fees_1788832800.json": "b4b7f441e70fe86796e396f19235551707e177efd18e1524da728e008d6808cd",
+      "fees_1788854400.json": "2d8ef68e9fa7c44a7b23441c2f5a8d5a8b8817e80f00d126480cddf8dcfe7d0c",
+      "fees_1788876000.json": "765e9334377785478ab275f35812ffbc6c4287c3869d80a5c5d33168ca7864d6",
+      "fees_1788897600.json": "79b687b8c5fd2a37ae4858dd672a79f2a1c02346df71af455510a48e68be953f",
+      "fees_1788919200.json": "f37140e41079b3f8deb1fd403a99c6f61823221526463d5c181c255ad619ee7a",
+      "fees_1788940800.json": "50bff4d5eae2cd3fa68c02d3318f2ba6fdd4da47c32723ba81e5e193483d74cf",
+      "fees_1788962400.json": "6a2fdd3036ed1cfb0e833a093b13d3134dfd0cc2adf85ac6a9d4ae596a16f8f1",
+      "fees_1788984000.json": "c6408d754f890617589186c7d88b646bd18f38f0ca0a12b5fdd62750e9ac3511",
+      "fees_1789005600.json": "a13a949869306d36f3f29ea2431b12598b0c1993543312b8308fb037ff80583f",
+      "fees_1789027200.json": "d0d1aa323495be0e6bb4232cfdf1f0f58dd88f7311d4c94a9d21a85b301a08f8",
+      "fees_1789048800.json": "da80d674c98e88859b2c371ee4a650febac25973ea86ffea0d446b707749b608",
+      "fees_1789070400.json": "abce024ec48524813bbf04db9dc3d326f2c925d74c4c69e5927cd493eb44a24c",
+      "fees_1789092000.json": "9858a37c3b20aad4b333cae8761c07523398fc16f80b8ded6b4ce5e085973446",
+      "fees_1789113600.json": "2413b7bbfafdd7774f9ce3884d76ea6d8a19208430c0ccf711657212ea75c991",
+      "fees_1789135200.json": "490217c179e0a0b2fa438ca9872d32b3f637e3d5e8d615a08878597ea673f8ae",
+      "fees_1789156800.json": "0603f8e14a1fae3e959fea7ddb5c2a8896f2060ad7f751eb3f55fd7f5be24efb",
+      "fees_1789178400.json": "6abf8b976144c47518879030da13aafc7b8aa48f105f32252160788204cd26af",
+      "fees_1789200000.json": "89a1df32d20fe1d629129e741b422f4e4ad42079a03f535c75281a0c3120282f",
+      "fees_1789221600.json": "a0e9d07a6062bed25cf3917b1793d7c36469a6526487290871a46c9a25a13570",
+      "fees_1789243200.json": "7900b2f1988cd90fdd26e1c5ac2ffb6c14fc669c887b5052e9092e678b8c943e",
+      "fees_1789264800.json": "946310549002e6a7d73327368a4ac47e44676640aa0221b86fb1022850ab418e",
+      "fees_1789286400.json": "6d9f3f5f9347d6961643ee719df84a87febbb30ab74b9f0cc360e7a6ca1167d0",
+      "fees_1789308000.json": "01912cbb7fc0d0294bebe7be6638f66381b6317aa42ed21be2b6ba37c876d476",
+      "fees_1789329600.json": "b2c1bfed707ce712d7f73a173e5da0e07bc87b572fd21934562f5fe5a1e38709",
+      "fees_1789351200.json": "f1f00e5dc7b39672b3183e3e1f002cb1a8156908c47c1fa1858cc25cabe16f9e",
+      "fees_1789372800.json": "8cedf49b7dca3272fda75c0c7ee9641398cea9fb421e00cc00af37c56d324c80",
+      "fees_1789394400.json": "d59ab71ec7922c99ec7cf7c1580913ba1976faa82a43d69680c7662a4f349984",
+      "fees_1789416000.json": "f7022dcc94776fead270a9843a9dd68469243f5d81ecb0b351cbb83024c4e57f",
+      "fees_1789437600.json": "72c00834942f0eb0eeb35195c8593ebf44caa801306e61ee2c6d3fd49a5208a8",
+      "fees_1789459200.json": "bf132f184909f7f70d662baed8f4fa9ef83b942631e0e1f79167be4dd874441e",
+      "fees_1789480800.json": "6f7927953410ffd6dae694838d86f94c9beee7fbe47e89ba169ea480b454eb89",
+      "fees_1789502400.json": "c38aeccf57cbba32035be9540663fb3dae2ee33c97c325a7cf70f41d1bd0020d",
+      "fees_1789524000.json": "5c4e55f06a951f33f54f849175a560860059e14426cf9fc05012dc9ba87b870b",
+      "fees_1789545600.json": "06d0521a3c2e9651081af190aa2f8811064f82898589afb6d767281cfe6ae006",
+      "fees_1789567200.json": "765613de1d2bd62b5259d9d28be746cac8c9798107d43ff6b3335fe95dbf5a2c",
+      "fees_1789588800.json": "0a06703670258f92de3ebc408abf23744c71c88435cbfa453e154f59036ce3d2",
+      "fees_1789610400.json": "fd8e8719fbd4c4c534d649d26559f209418e357867e7bd56500c1504f271609f",
+      "fees_1789632000.json": "48241d8581f7fe44c8a22724878573193d6e2abc7ffff522135965d3a5456837",
+      "fees_1789653600.json": "f056e47394fc6b46b6e712f1971ec2fb4f04a3d9a438a75bc08075177c9db9d5",
+      "fees_1789675200.json": "3473f857f89ae79e1960e4bfa870086a8a9651a8c7e6a1354b991e3465511771",
+      "fees_1789696800.json": "4941e266ff28bf6ea44dc9ff514143c5a5469810235358df4289d65bdd493560",
+      "funding.json": "eb706f4d69c44d15cfe536bee18c583582d432d0573007271d1bac9c45ac33b3",
+      "funding_after_1788922800012.json": "5f9d71943edd9bb403eb13600526587e8520a59186a8181b69ea78a332e7c6a5",
+      "hl_1h_1786435200.json": "e95d4a83253f12bf4eb44b67485cd5a5a193a12bc3c61fe166593bde6b8c177b",
+      "hl_1h_1787040000.json": "41c40a99bf680e55651ddaaa5487287ad60044116253c2c4b2508ba664a414bb",
+      "hl_1h_1787644800.json": "eaa50155da6aa663535d8721ed7507397516d3ff381f99497d8760bd678a3bbc",
+      "hl_1h_1788249600.json": "524ed2dfc596bbb60a1f87f04df6035a6c010cc38fb6f015a6db201d29e69eef",
+      "hl_1h_1788854400.json": "1fee4064ff7385573f815dad6d497cf9ce5235bdf52e0fb7d1234cd9aa59dedc",
+      "hl_1h_1789459200.json": "48184578c4333ca51bdcfac18dc543887e99248f7eec090a35b72bf95238fad6",
+      "hl_5m_1787126400.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "hl_5m_1787385600.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "hl_5m_1787644800.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "hl_5m_1787904000.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "hl_5m_1788163200.json": "f4159d845b978199dfa84a0817fa52b09fd6767d1f5f605c24088348e3f12e6c",
+      "hl_5m_1788422400.json": "3582f5d337c655b3a20fad85d62b75670be6c07cd6caea7b959d1f8859b43848",
+      "hl_5m_1788681600.json": "e1bec68ebce133769446f83cb8ef06d6ccd5cfc8268a12cb136dea76c9e8cd1a",
+      "hl_5m_1788940800.json": "8b88220546cc6e354fbb33baa739e10c2de44575c11ec837f6cc797fe61778b9",
+      "hl_5m_1789200000.json": "09787ac7b4ef9302e1b3840e87837d6a8e82d71e5ac9009c607d20acc673f9c3",
+      "hl_5m_1789459200.json": "541766589d6604dc7f4fc43cd51e5080609aa0138b1b2c7e4e4b262d785a6b31",
+      "pool.json": "fbc36ea0e87889f619e3b418a28882039a9b2339c9fc61894b697bb3966976c3",
+      "pool_1787126400.json": "af346ceb8a227305c7e30e0e7266b3644af100bdf28ac1a7a21fa3085d24b4f1",
+      "pool_1787148000.json": "5a7c044a4b4be97e3bd69ac98dbd217ee3fca1a3f146eb18a190440b39836c4f",
+      "pool_1787169600.json": "7483b567b1444af7f44c67934cf4d06f045da0b8f4ec886d7e8dd2aa519ac8a6",
+      "pool_1787191200.json": "c5223cce67e3ff3cf94e78c7a84762dd166a11e1eb2736db9bc0dc7ee14b26e5",
+      "pool_1787212800.json": "4de9439a0a85e555b14ee24b68e1f41e869439270b32199290edb14ad5e56291",
+      "pool_1787234400.json": "884c29b4c9791c5639968dff84befe6a693049b3c5d85dc0849e5d907aae5290",
+      "pool_1787256000.json": "87a2bbe872d9d96f4e80550d90db0bf9338e426c6eaee7e4bea02ccbf7a850c5",
+      "pool_1787277600.json": "2a4d926cd1170ba9b56226d7e862037291755ede724b30a3fb4178f147832101",
+      "pool_1787299200.json": "ee50fcc3f05af1c44e6cde84540955f9fc513533741fa4be721bf6d2f55b52be",
+      "pool_1787320800.json": "ee920056ea010890bf9db869c39744b9ac96fee4ef0eab40d8757d9001a6958a",
+      "pool_1787342400.json": "ee71bb00fa23bf83f1eb985fefe8661e681323e14dd741d5caac86c5900c7086",
+      "pool_1787364000.json": "5a5e012023375250ba72bd9fba8d75127d5a9669c5ab529a9afeaaf1d23f8f4b",
+      "pool_1787385600.json": "1ea2c95e67fd16b9d07bce5f1a5235c61afe3342873108be262000d295c96c65",
+      "pool_1787407200.json": "731e7639fc5886c408c010bb50d46395980e093977f4a9bc97a850b0c054aa10",
+      "pool_1787428800.json": "40837e5cb0544c0e6ac4853670d2bbac6ae9af6a55cb9b0e7308859c21a1f3ee",
+      "pool_1787450400.json": "b66833892fbcc975f60dfc9c5f3027e6694c383900758f72f1a2916344426cc3",
+      "pool_1787472000.json": "d57c8e19d947a4f6a251eee0d52e36c9d1a6c45ba32a98fb37d3b08a28acdd43",
+      "pool_1787493600.json": "240d5787425efb8a7ea744eb38c2a1c0f4334858a6987afad973f03107c02e30",
+      "pool_1787515200.json": "212ff64332a8ea44192f22a03072b44480475a9695f2d4c968c59bf694c7cf4f",
+      "pool_1787536800.json": "d30f88f244400b749d60964688bc380f3c323a96872f0e9de5b6c6037b467c96",
+      "pool_1787558400.json": "fba4a82d5e89980215d68bb0c545611528cc283999f08f7dccc5cc8a86a435d0",
+      "pool_1787580000.json": "dfa4aa6850af0c84b57173f2d632f38c871f9cf43bfe0b714d1a7532346a1f86",
+      "pool_1787601600.json": "218ed107c7247a9b985f53ea48fd31a63e948fae36de191c55ae72636fb5ce01",
+      "pool_1787623200.json": "89b9eecca7305f577b1701342e6914e789b34abadb0a869b6e369ead3f3bca2f",
+      "pool_1787644800.json": "98b7ad01db9c30871611b4d1385e8b577e8d196907f15ecf08001937623e24b7",
+      "pool_1787666400.json": "66830539366a14bc361c7ef52d5d36102f6abdd7ee01a2076ce13856c948727b",
+      "pool_1787688000.json": "1fe5313d40639894bcba37a71bb9260828cd64d529a30bbf007233d99e4459c6",
+      "pool_1787709600.json": "517350ee8680bdc473d00517b7c6b2c512a977b571134c472df9a7e850672659",
+      "pool_1787731200.json": "e407dc96297e3d002c6664d005932222a390600d258db379d7f191a99680ddb1",
+      "pool_1787752800.json": "b8f697f471c5b71ee6065365c24fd7d99d592cceea3b669789986f2337c10dcf",
+      "pool_1787774400.json": "c98900b8ea86748811e88691b4b5f3f2ab1bb7c03f7741e223ecfa0a905a27e1",
+      "pool_1787796000.json": "b140175610a01ba565a4cb96a8212a88569d9cc150aeba64d4d5bf74c056ea1f",
+      "pool_1787817600.json": "0667a562542889182f602b3b9cdfdd6aed1d866c5cc3c70315f3b9d6898786ea",
+      "pool_1787839200.json": "99a9adc3924e12d8a0b635df499ffd07e642f5756525bfcba18830ea14037df7",
+      "pool_1787860800.json": "0a4bde0ec812e37204bb39ee792b76918a1e65cf91c63f4d6da0365a817850f3",
+      "pool_1787882400.json": "3a1559ddc10660e18e3e45bad543fbabcfba7b2140d567b38fe38f7597f62965",
+      "pool_1787904000.json": "d3202095c08000a5c374e2e61b01e4dcd530f93106a5d4a3cee5c24e294a2883",
+      "pool_1787925600.json": "dd8fa829e3be8dfbb15b7a021899985e3f281e5a2f4702359b63ea75dbf808d4",
+      "pool_1787947200.json": "48155ed005f18a615c167f3d1d53ead9cbff3a8028b249b27f8749682946a675",
+      "pool_1787968800.json": "19f16f8334c1e9e34233a39ce4fda734a8dbc694705f89c4675857440d53fe0b",
+      "pool_1787990400.json": "1b6ecaeac29d7ce8273364d63ad4108ec021b8345c2b117a6a5ae9576ecb1d9f",
+      "pool_1788012000.json": "7f0b183fbf6a83535a8d51f2196290289fb50f24d841d292be92a3595eb49613",
+      "pool_1788033600.json": "801ae27b8ec53ebbc20224e9bad9cf83a13243dcca5120ee5ef593d2f02edbaf",
+      "pool_1788055200.json": "10da52b17a053c94e75fca4c46cf39e95087d15425a440ec0a7515820b31f6f6",
+      "pool_1788076800.json": "ddfa88da28f1e43f2da16edf1b374a939fe73d98bbdbc81f60c3b695c4503c72",
+      "pool_1788098400.json": "9f6cd57f9f9a20d9a198b3e8197cb3a31da9e91d89fc9b9c03092bbc5609476d",
+      "pool_1788120000.json": "044c6373eed533b261f77b9e8f639d6fff91e98d4eea1f037e9dfbd4e02c3961",
+      "pool_1788141600.json": "0de4fdf5833e9ecbf057f7354800b3b8170c8e3554ae5fe6edb05392ab23ef68",
+      "pool_1788163200.json": "62099180b7d219066f4d5c1c07ecd2ec91d35e18761cfab4d816ea1d17fbb9df",
+      "pool_1788184800.json": "dfe379293eea34bf50b7e1d683f511c3a343450f64475f1d62264b33f15874c3",
+      "pool_1788206400.json": "a0216b2a7ba21cb18b56d2943e681fb4617dea9c7e7f61f42746fb75349db164",
+      "pool_1788228000.json": "7d7a31e2e5f336ae379ccdcd214118f04fb00350e12ce876b0b66aada1460911",
+      "pool_1788249600.json": "f3c88961e5cf2448e43d0fedea63d2876e626ec541118b5cb484ce39369cbea6",
+      "pool_1788271200.json": "1d983b87cd116a6ad1e4b8239810472eb27e1c2d56165087a7a51a6b9ee6afe3",
+      "pool_1788292800.json": "453113e189b1a685ad48d38fcb9e441d13a71995319df129dc1d9c82d1675629",
+      "pool_1788314400.json": "4bce955a41b4702ec18c0f0e77b31db42bfcfa60c66beb0ddc201e9ac9e9734e",
+      "pool_1788336000.json": "a98be1a66f0d1baf614e568ceabb25b585925f148cffa64e9b49b9dada7462ee",
+      "pool_1788357600.json": "074896759242e20f95c3bde7d2fd0512e40a969cc862b1d4071e340dcbc300ed",
+      "pool_1788379200.json": "2d25bc751d0fde21a56e6e3dd6bada74eea79ce6500b22ad73d8bc28d6145296",
+      "pool_1788400800.json": "ff3ecdd19966c4532d5ce93cc2425fd0178a722d98b7200bba76310e623f8880",
+      "pool_1788422400.json": "6cdb84345fdb437cc1cc20efc2f266d5725eb0b623a575fa5dd8d3ddf040d821",
+      "pool_1788444000.json": "b4a9e8e8dd79843cd452fe15e5ca5ad94a871809bca4e7d998bb9b0c0da82949",
+      "pool_1788465600.json": "4320fd39b4e99486f1ae90cd8666daa5f6a55ee16661ee06f61a568d1a912b5b",
+      "pool_1788487200.json": "28342cc63e2a0abf06175e34e2404e28286c977ad16fc8964a95fe0539d036f4",
+      "pool_1788508800.json": "fe6d87db37397c386c890ebf65830ba1bd927d327151f763510248a7f373935f",
+      "pool_1788530400.json": "0c19e19d6eac4081739785c4a0bdc0b5b3bfdc6287db4413f207893b5091db79",
+      "pool_1788552000.json": "be1eed3cc6a4d9f30021ce2db0c28c51b3bbb209473fe5418ca9b0370f8eab07",
+      "pool_1788573600.json": "ec87a04eb5fd512411de42c65dc079da399e75948830f57f205d4cd21601ea3c",
+      "pool_1788595200.json": "de654183b0ef472e8a745ed04cc9d82550b3fea1a086973162c1e3ab747b4dfc",
+      "pool_1788616800.json": "223414c68bca1e0ca389f327892cd7d2a9177475f2857cd69b7784d08aca151e",
+      "pool_1788638400.json": "62c07d2921b881e05bbea2d3caf95a6cde947b0ce416f28bd5e0e524dab87303",
+      "pool_1788660000.json": "df11ee5469a2b13b1eba07feda20fc17279d5c0a32989ee9ae33579ffb0a147b",
+      "pool_1788681600.json": "fd479f2dc299a5898e02126cf656f483f3db26d61692037ed3788779a7c99821",
+      "pool_1788703200.json": "f91da71ba706c3db46516d26083b377ed4002ec540d14ae1f2ce6b8ba7cc6dab",
+      "pool_1788724800.json": "de56a102ddc3a3c23edb4b44f7aed900ebabf03f352bf5f03e4907a958d12172",
+      "pool_1788746400.json": "8b61e7659d7c89cfb4c0e38ed22ffeca24ad8425e3021968e7b7ed6a488c8390",
+      "pool_1788768000.json": "84d6b86acf2c0f1dc68349db5b9cd126ce2630707510c089bf7a3da8ea47f56a",
+      "pool_1788789600.json": "6e2fd2e513f3c0c9da0f944fe7cc75084bfb27d02345560f73bd22b8d7904951",
+      "pool_1788811200.json": "6fa018fb52d305c6dfac6250ce9cdcbdfd278b4e676064c92938c01d94c29fb2",
+      "pool_1788832800.json": "a35308daf5f1797d2f192826928b6f36ec882baddec7a079fe695d9b3f3bec9a",
+      "pool_1788854400.json": "93a83d5b2ff420910759a7821c320b1e1a651bbbb9c15639d31a7d9b3466b999",
+      "pool_1788876000.json": "f4ab7e815fdfc957b761bb9ede0c7b1a53a045d4a45eb493893933633aaa7e17",
+      "pool_1788897600.json": "0f0bc77f0108e4ea9f8123d1f03eb570ad52b262e1f28e08c2027c4c85f6dcaf",
+      "pool_1788919200.json": "e04ca9c8994540978b0c8a38f31573e975eae91a2d5ebe2e0ec7fc598ed878dc",
+      "pool_1788940800.json": "46d230eedc073607cc6fe5c13391570ac7fe583b005172dbdf853309e3f57f2e",
+      "pool_1788962400.json": "ec2e21b63df2397f60c89015aa18fa728eba68f1cf5a9e79e7c802c056d96988",
+      "pool_1788984000.json": "1510f06f2165e0f24bae13b415d54835121571f70773ff15f79b41db74d6f013",
+      "pool_1789005600.json": "356d1e447f669c71d9beb3dcf8130e9d0702971890147edb0b556b4b411cde63",
+      "pool_1789027200.json": "2c200e5d3605e9f9723d340abba6a39c4dadbd021e8698696c4d2bc54a411b4e",
+      "pool_1789048800.json": "60e87ad941e5eeb0de5dd9862f0ddfb4311dd0aefbc22f8b637caf7da55caf5a",
+      "pool_1789070400.json": "9888cf6c4bad5478db1fd1298750bd7566ceaf960cc8a0283c226999ea105c0a",
+      "pool_1789092000.json": "1b971e3f0840e0a0df91614705d947aa551bd65cadba3483b8f263328abeb1d6",
+      "pool_1789113600.json": "c8bf4607300f63d9cf4110a15c8b585a39aea204df90e6181452abfee2249f16",
+      "pool_1789135200.json": "b15dd73adba639f4cc264762556d1d9a0522975e39831143d774ad668e1c322f",
+      "pool_1789156800.json": "978d99d4c815f7ab21225dd29aaa759b9ecacef46e1dab04d7ec2a7042fe9423",
+      "pool_1789178400.json": "58a75dd726939854a57adc31c474515e35e1a5acc35b90b402ed8c8e3d5e6006",
+      "pool_1789200000.json": "3b282a95d2821eea0589546081dd943b186e46c6e5673e122695ad9603c47c40",
+      "pool_1789221600.json": "31e3b035af69f2f268639c3a822d1b2dbdff79380f9a6dbaaa61a7c5935c8d48",
+      "pool_1789243200.json": "bb4a6df0771de5665f43c1609cdba7ace00e3d04c641e9bbf00ff88f3631697b",
+      "pool_1789264800.json": "47062af938247cae8dab2c62cbaf193e7be568835d37c6aeab6e9a03f4be6839",
+      "pool_1789286400.json": "ae7d67be4c6ec4a7e1443445873e6b05c420cb29eb2e9e036499540c8c3c8e31",
+      "pool_1789308000.json": "0d395bc1c52de313971f7555830c25317880d10c63eeab0433561e800d85aa88",
+      "pool_1789329600.json": "d611cfabb1b736e9027778efb551978a1162ae2dd66ef5cba2ec00d38487bd2a",
+      "pool_1789351200.json": "7f1660e2a93af7ccfbc322fe5454a1c73cd94a88eecbb981fc8f8e89f462d969",
+      "pool_1789372800.json": "1a02afc171acd481fd6c212ae13c597016466ad22aca18373ffb78b2f7a900bd",
+      "pool_1789394400.json": "759e035c9841b8b719c55f2e7cab2cf1fab7ced3212a63ad20f172c284a106fa",
+      "pool_1789416000.json": "4aae2f81b5bf560145c74a7dfcf5f03bf2a1369245856ea5d3befec6c3ce30f9",
+      "pool_1789437600.json": "9eb21a2b84d5563fc82fdfe9bfcff796075e33bb94352ee69c0bdb953213bc9a",
+      "pool_1789459200.json": "72667211cbe5b852074e87e917450c8f10e78ac669f2ee773ce083cb5543b422",
+      "pool_1789480800.json": "eb926d6a8c532e23be7c83bd112c43abeb416fe07e90c4c5b241929cce294c60",
+      "pool_1789502400.json": "025c86a67f6bab94d5274400673abcd1fb5c2cee26b4c620bb2d7bf17279640c",
+      "pool_1789524000.json": "7fbd5629008d262b0671ccaf8bfea71547716463bc0026eef1204c496ee21ae3",
+      "pool_1789545600.json": "71c7def0556ebe554caee96406d495cbf95920545c0ce2117edde0677f3ce111",
+      "pool_1789567200.json": "4c8a5b26e4aa06206716d3e3c7a048be8953c7a75d259de2dee91652ac7f2eef",
+      "pool_1789588800.json": "3ab0a90cea7c798045b836c62ffb4c36ac521bf0d69416e87adb2829088cf821",
+      "pool_1789610400.json": "e1a8aa5532269b5b821aef6c7fd1b82e05db07f2bfaf09bb70de18e40c2a9d31",
+      "pool_1789632000.json": "0c205185b8c22647239ca15521b23a480ab7e0473ec99524b6d646129e89711b",
+      "pool_1789653600.json": "bc8a8b90453daea779491aef4f932d32539bc05d49e381b80edca24620492c92",
+      "pool_1789675200.json": "eab4c9353d1d226bfead5e8160fd95d9e52f06e95b0c83a7ae3a4cea98cc4af4",
+      "pool_1789696800.json": "d7e0333b5c387960c68d12fe407e28eb98845e95136a503da5d398e57e24e801",
+      "rent_8112.json": "d6eb0cba53a26d63b333954af5919f1b753f8abd60ba4fd4b6e00fcb5c9883b4",
+      "rent_8224.json": "74df568d761d9a4b67ccbfc948df4d1d10154993cceafa81056b88d993270618"
+    }
+  },
+  "rent_schedule": {
+    "observed_utc": "2026-09-18T08:52:05.089622+00:00",
+    "source": "Solana mainnet getMinimumBalanceForRentExemption, SDK 1.9.14 position size",
+    "base_position_bytes": 8112,
+    "base_position_bins": 70,
+    "extra_bin_bytes": 112,
+    "base_position_lamports": 41859200,
+    "extra_bin_lamports": 568960,
+    "assumption": "Current schedule for initial feasibility, not historical rent PnL. Missing bin-array rent excluded; live simulation checks it."
+  },
+  "selection": "Filter initial rent budget using observed current rent schedule, then first 21 days only: pre-personal-fee PnL minus 2 * dollar maximum drawdown. Last 9 days held out. No optimization on hypothetical fees.",
+  "assumptions": [
+    "30-day hourly execution approximation; cannot resolve 15-second risk or 15-minute breakout paths",
+    "Separate 5-minute overlapping-period sensitivity, NOT a complete one-month 5m test",
+    "Discrete equal-value bins model; live uses official SDK Spot with actual bin composition",
+    "No historical per-bin liquidity shares: personal fee sensitivity is hypothetical, not realized income",
+    "Taker 4.5bps + 3bps slippage on hedge notional; maker-only fee case assumes fills and is not an executable guarantee",
+    "Inventory swap cost 34bps, operation gas/priority $0.10; rent locks capital and is not expensed here",
+    "No queued maker fills, funding timestamp mark approximated at observation; no liquidation engine",
+    "Assumed fee credits do not feed back into sizing/drawdown; missing fee observations excluded, not fabricated",
+    "Open positions marked to market at final completed candle close; closing and cash-out costs not charged"
+  ],
+  "selected": {
+    "wide": 0.025,
+    "narrow": 0.008,
+    "inside_hedge_ratio": 0.5
+  },
+  "candidates": [
+    {
+      "wide": 0.025,
+      "narrow": 0.008,
+      "inside_hedge_ratio": 0.5,
+      "train_score": -30.566362015361165,
+      "initial_rent_budget_feasible": true,
+      "initial_rent_plus_gas_reserve_usd": 11.460822202310796,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -10.188787338453722,
+        "return_excluding_lp_fees_pct": -5.094393669226861,
+        "max_drawdown_pct": 5.094393669226861,
+        "lp_active_hours": 78.0,
+        "lp_operations": 26,
+        "hedge_fees": 0.6633668700000003,
+        "swap_costs": 3.3738935158485517,
+        "operation_costs": 2.600000000000001,
+        "funding_pnl": 0.013167091448935004,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 13.508851987741965,
+            "pnl_plus_hypothetical_fees_usd": 3.320064649288243,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.7021201442068348,
+            "pnl_plus_hypothetical_fees_usd": -7.486667194246887,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.6755464335370617,
+            "pnl_plus_hypothetical_fees_usd": -9.51324090491666,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.188787338453722,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -6.64986470268633,
+        "return_excluding_lp_fees_pct": -3.324932351343165,
+        "max_drawdown_pct": 3.352512157477292,
+        "lp_active_hours": 84.0,
+        "lp_operations": 18,
+        "hedge_fees": 0.56499615,
+        "swap_costs": 2.6833636097302755,
+        "operation_costs": 1.8000000000000005,
+        "funding_pnl": 0.014805463757219998,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 5.203478869125026,
+            "pnl_plus_hypothetical_fees_usd": -1.4463858335613038,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.040858500597326,
+            "pnl_plus_hypothetical_fees_usd": -5.609006202089003,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.260222254635302,
+            "pnl_plus_hypothetical_fees_usd": -6.389642448051028,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 6.64986470268633,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -10.188787338453722,
+        "return_excluding_lp_fees_pct": -5.094393669226861,
+        "max_drawdown_pct": 5.094393669226861,
+        "lp_active_hours": 78.0,
+        "lp_operations": 26,
+        "hedge_fees": 0.6633668700000003,
+        "swap_costs": 3.3738935158485517,
+        "operation_costs": 2.600000000000001,
+        "funding_pnl": 0.013167091448935004,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 13.508851987741965,
+            "pnl_plus_hypothetical_fees_usd": 3.320064649288243,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.7021201442068348,
+            "pnl_plus_hypothetical_fees_usd": -7.486667194246887,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.6755464335370617,
+            "pnl_plus_hypothetical_fees_usd": -9.51324090491666,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.188787338453722,
+        "phase": "Halted"
+      }
+    },
+    {
+      "wide": 0.025,
+      "narrow": 0.008,
+      "inside_hedge_ratio": 1.0,
+      "train_score": -30.966814182811845,
+      "initial_rent_budget_feasible": true,
+      "initial_rent_plus_gas_reserve_usd": 11.460822202310796,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -10.322271394270615,
+        "return_excluding_lp_fees_pct": -5.1611356971353075,
+        "max_drawdown_pct": 5.1611356971353075,
+        "lp_active_hours": 58.0,
+        "lp_operations": 22,
+        "hedge_fees": 0.7439990325000001,
+        "swap_costs": 2.8832285095028736,
+        "operation_costs": 2.2000000000000006,
+        "funding_pnl": 0.019889720084897002,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 10.517096171055519,
+            "pnl_plus_hypothetical_fees_usd": 0.19482477678490362,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.103717495574795,
+            "pnl_plus_hypothetical_fees_usd": -8.21855389869582,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.5259433577157344,
+            "pnl_plus_hypothetical_fees_usd": -9.79632803655488,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.322271394270615,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -6.785403457384291,
+        "return_excluding_lp_fees_pct": -3.3927017286921455,
+        "max_drawdown_pct": 3.3927017286921455,
+        "lp_active_hours": 84.0,
+        "lp_operations": 18,
+        "hedge_fees": 0.6769867800000002,
+        "swap_costs": 2.6833636097302755,
+        "operation_costs": 1.8000000000000005,
+        "funding_pnl": 0.028617339059289995,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 5.203478869125026,
+            "pnl_plus_hypothetical_fees_usd": -1.5819245882592652,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.040858500597326,
+            "pnl_plus_hypothetical_fees_usd": -5.744544956786965,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.260222254635302,
+            "pnl_plus_hypothetical_fees_usd": -6.525181202748989,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 6.785403457384291,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -10.322271394270615,
+        "return_excluding_lp_fees_pct": -5.1611356971353075,
+        "max_drawdown_pct": 5.1611356971353075,
+        "lp_active_hours": 58.0,
+        "lp_operations": 22,
+        "hedge_fees": 0.7439990325000001,
+        "swap_costs": 2.8832285095028736,
+        "operation_costs": 2.2000000000000006,
+        "funding_pnl": 0.019889720084897002,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 10.517096171055519,
+            "pnl_plus_hypothetical_fees_usd": 0.19482477678490362,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.103717495574795,
+            "pnl_plus_hypothetical_fees_usd": -8.21855389869582,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.5259433577157344,
+            "pnl_plus_hypothetical_fees_usd": -9.79632803655488,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.322271394270615,
+        "phase": "Halted"
+      }
+    },
+    {
+      "wide": 0.025,
+      "narrow": 0.008,
+      "inside_hedge_ratio": 0.0,
+      "train_score": -30.987318654378775,
+      "initial_rent_budget_feasible": true,
+      "initial_rent_plus_gas_reserve_usd": 11.460822202310796,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -10.14041875786026,
+        "return_excluding_lp_fees_pct": -5.07020937893013,
+        "max_drawdown_pct": 5.211724974129629,
+        "lp_active_hours": 90.0,
+        "lp_operations": 28,
+        "hedge_fees": 0.83176176,
+        "swap_costs": 3.939121623202753,
+        "operation_costs": 2.800000000000001,
+        "funding_pnl": 0.00375093218644,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 14.016855529329998,
+            "pnl_plus_hypothetical_fees_usd": 3.876436771469738,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.803736370329859,
+            "pnl_plus_hypothetical_fees_usd": -7.336682387530401,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.7009512176099453,
+            "pnl_plus_hypothetical_fees_usd": -9.439467540250314,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.14041875786026,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -6.792504613377901,
+        "return_excluding_lp_fees_pct": -3.3962523066889503,
+        "max_drawdown_pct": 3.7048781019649506,
+        "lp_active_hours": 84.0,
+        "lp_operations": 18,
+        "hedge_fees": 0.648843975,
+        "swap_costs": 2.6833636097302755,
+        "operation_costs": 1.8000000000000005,
+        "funding_pnl": 0.003913378065639999,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 5.203478869125026,
+            "pnl_plus_hypothetical_fees_usd": -1.5890257442528748,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.040858500597326,
+            "pnl_plus_hypothetical_fees_usd": -5.751646112780574,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.260222254635302,
+            "pnl_plus_hypothetical_fees_usd": -6.532282358742599,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 6.792504613377901,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -10.14041875786026,
+        "return_excluding_lp_fees_pct": -5.07020937893013,
+        "max_drawdown_pct": 5.211724974129629,
+        "lp_active_hours": 90.0,
+        "lp_operations": 28,
+        "hedge_fees": 0.83176176,
+        "swap_costs": 3.939121623202753,
+        "operation_costs": 2.800000000000001,
+        "funding_pnl": 0.00375093218644,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 14.016855529329998,
+            "pnl_plus_hypothetical_fees_usd": 3.876436771469738,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.803736370329859,
+            "pnl_plus_hypothetical_fees_usd": -7.336682387530401,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.7009512176099453,
+            "pnl_plus_hypothetical_fees_usd": -9.439467540250314,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.14041875786026,
+        "phase": "Halted"
+      }
+    },
+    {
+      "wide": 0.012,
+      "narrow": 0.004,
+      "inside_hedge_ratio": 0.0,
+      "train_score": -31.140085423181603,
+      "initial_rent_budget_feasible": true,
+      "initial_rent_plus_gas_reserve_usd": 9.054015083030693,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -10.380028474393868,
+        "return_excluding_lp_fees_pct": -5.190014237196934,
+        "max_drawdown_pct": 5.190014237196934,
+        "lp_active_hours": 70.0,
+        "lp_operations": 26,
+        "hedge_fees": 0.7612182450000001,
+        "swap_costs": 3.434581000781683,
+        "operation_costs": 2.600000000000001,
+        "funding_pnl": 0.00925171763009,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 18.456185792782705,
+            "pnl_plus_hypothetical_fees_usd": 8.076157318388837,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 3.6921661875369733,
+            "pnl_plus_hypothetical_fees_usd": -6.687862286856895,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.9230851110470943,
+            "pnl_plus_hypothetical_fees_usd": -9.456943363346774,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.380028474393868,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -7.814493382071419,
+        "return_excluding_lp_fees_pct": -3.9072466910357093,
+        "max_drawdown_pct": 3.9790884801967366,
+        "lp_active_hours": 84.0,
+        "lp_operations": 18,
+        "hedge_fees": 0.70700505,
+        "swap_costs": 2.8260139113650187,
+        "operation_costs": 1.8000000000000005,
+        "funding_pnl": 0.00804833794406,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 8.49952409071397,
+            "pnl_plus_hypothetical_fees_usd": 0.685030708642552,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.700424831639289,
+            "pnl_plus_hypothetical_fees_usd": -6.11406855043213,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.42513059442073525,
+            "pnl_plus_hypothetical_fees_usd": -7.3893627876506836,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 7.814493382071419,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -10.380028474393868,
+        "return_excluding_lp_fees_pct": -5.190014237196934,
+        "max_drawdown_pct": 5.190014237196934,
+        "lp_active_hours": 70.0,
+        "lp_operations": 26,
+        "hedge_fees": 0.7612182450000001,
+        "swap_costs": 3.434581000781683,
+        "operation_costs": 2.600000000000001,
+        "funding_pnl": 0.00925171763009,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 18.456185792782705,
+            "pnl_plus_hypothetical_fees_usd": 8.076157318388837,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 3.6921661875369733,
+            "pnl_plus_hypothetical_fees_usd": -6.687862286856895,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.9230851110470943,
+            "pnl_plus_hypothetical_fees_usd": -9.456943363346774,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.380028474393868,
+        "phase": "Halted"
+      }
+    },
+    {
+      "wide": 0.012,
+      "narrow": 0.004,
+      "inside_hedge_ratio": 0.5,
+      "train_score": -31.208234911625368,
+      "initial_rent_budget_feasible": true,
+      "initial_rent_plus_gas_reserve_usd": 9.054015083030693,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -10.40274497054179,
+        "return_excluding_lp_fees_pct": -5.201372485270895,
+        "max_drawdown_pct": 5.201372485270895,
+        "lp_active_hours": 59.0,
+        "lp_operations": 24,
+        "hedge_fees": 0.69735018,
+        "swap_costs": 3.1334480751736784,
+        "operation_costs": 2.400000000000001,
+        "funding_pnl": 0.011801926574575001,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 16.838879550843583,
+            "pnl_plus_hypothetical_fees_usd": 6.436134580301793,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 3.368665801735264,
+            "pnl_plus_hypothetical_fees_usd": -7.034079168806525,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.8422081797574841,
+            "pnl_plus_hypothetical_fees_usd": -9.560536790784305,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.40274497054179,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -7.705527325852955,
+        "return_excluding_lp_fees_pct": -3.8527636629264777,
+        "max_drawdown_pct": 3.8718245395875073,
+        "lp_active_hours": 84.0,
+        "lp_operations": 18,
+        "hedge_fees": 0.7420919999999996,
+        "swap_costs": 2.8260139113650187,
+        "operation_costs": 1.8000000000000005,
+        "funding_pnl": 0.01850134416254,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 8.49952409071397,
+            "pnl_plus_hypothetical_fees_usd": 0.7939967648610153,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.700424831639289,
+            "pnl_plus_hypothetical_fees_usd": -6.005102494213666,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.42513059442073525,
+            "pnl_plus_hypothetical_fees_usd": -7.28039673143222,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 7.705527325852955,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -10.40274497054179,
+        "return_excluding_lp_fees_pct": -5.201372485270895,
+        "max_drawdown_pct": 5.201372485270895,
+        "lp_active_hours": 59.0,
+        "lp_operations": 24,
+        "hedge_fees": 0.69735018,
+        "swap_costs": 3.1334480751736784,
+        "operation_costs": 2.400000000000001,
+        "funding_pnl": 0.011801926574575001,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 16.838879550843583,
+            "pnl_plus_hypothetical_fees_usd": 6.436134580301793,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 3.368665801735264,
+            "pnl_plus_hypothetical_fees_usd": -7.034079168806525,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.8422081797574841,
+            "pnl_plus_hypothetical_fees_usd": -9.560536790784305,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.40274497054179,
+        "phase": "Halted"
+      }
+    },
+    {
+      "wide": 0.04,
+      "narrow": 0.012,
+      "inside_hedge_ratio": 0.5,
+      "train_score": -31.83830550110713,
+      "initial_rent_budget_feasible": true,
+      "initial_rent_plus_gas_reserve_usd": 14.699071780978569,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -10.612768500369043,
+        "return_excluding_lp_fees_pct": -5.3063842501845215,
+        "max_drawdown_pct": 5.3063842501845215,
+        "lp_active_hours": 102.0,
+        "lp_operations": 25,
+        "hedge_fees": 0.7237245825000003,
+        "swap_costs": 3.7754063998802665,
+        "operation_costs": 2.500000000000001,
+        "funding_pnl": 0.016312439245382,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 12.9341378398812,
+            "pnl_plus_hypothetical_fees_usd": 2.3213693395121577,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.5870800397199436,
+            "pnl_plus_hypothetical_fees_usd": -8.0256884606491,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.6467818461141484,
+            "pnl_plus_hypothetical_fees_usd": -9.965986654254895,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.612768500369043,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -5.989750979606356,
+        "return_excluding_lp_fees_pct": -2.994875489803178,
+        "max_drawdown_pct": 3.0096474287727517,
+        "lp_active_hours": 84.0,
+        "lp_operations": 17,
+        "hedge_fees": 0.44089777500000005,
+        "swap_costs": 2.487809334062108,
+        "operation_costs": 1.7000000000000004,
+        "funding_pnl": 0.012765025457669998,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 3.5935572772422275,
+            "pnl_plus_hypothetical_fees_usd": -2.3961937023641284,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 0.7187859602924214,
+            "pnl_plus_hypothetical_fees_usd": -5.270965019313935,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.17969998299298995,
+            "pnl_plus_hypothetical_fees_usd": -5.810050996613366,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 5.989750979606356,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -10.612768500369043,
+        "return_excluding_lp_fees_pct": -5.3063842501845215,
+        "max_drawdown_pct": 5.3063842501845215,
+        "lp_active_hours": 102.0,
+        "lp_operations": 25,
+        "hedge_fees": 0.7237245825000003,
+        "swap_costs": 3.7754063998802665,
+        "operation_costs": 2.500000000000001,
+        "funding_pnl": 0.016312439245382,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 12.9341378398812,
+            "pnl_plus_hypothetical_fees_usd": 2.3213693395121577,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.5870800397199436,
+            "pnl_plus_hypothetical_fees_usd": -8.0256884606491,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.6467818461141484,
+            "pnl_plus_hypothetical_fees_usd": -9.965986654254895,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.612768500369043,
+        "phase": "Halted"
+      }
+    },
+    {
+      "wide": 0.04,
+      "narrow": 0.012,
+      "inside_hedge_ratio": 1.0,
+      "train_score": -31.880513215656293,
+      "initial_rent_budget_feasible": true,
+      "initial_rent_plus_gas_reserve_usd": 14.699071780978569,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -10.626837738552098,
+        "return_excluding_lp_fees_pct": -5.313418869276049,
+        "max_drawdown_pct": 5.313418869276049,
+        "lp_active_hours": 85.0,
+        "lp_operations": 24,
+        "hedge_fees": 0.7567333649999999,
+        "swap_costs": 3.3562955884668275,
+        "operation_costs": 2.400000000000001,
+        "funding_pnl": 0.025436678040860992,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 10.889053913649224,
+            "pnl_plus_hypothetical_fees_usd": 0.2622161750971266,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.1780087099347583,
+            "pnl_plus_hypothetical_fees_usd": -8.44882902861734,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.5445114564634705,
+            "pnl_plus_hypothetical_fees_usd": -10.082326282088626,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.626837738552098,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -6.0175564446234375,
+        "return_excluding_lp_fees_pct": -3.0087782223117188,
+        "max_drawdown_pct": 3.0149765512812934,
+        "lp_active_hours": 84.0,
+        "lp_operations": 17,
+        "hedge_fees": 0.52620813,
+        "swap_costs": 2.487809334062108,
+        "operation_costs": 1.7000000000000004,
+        "funding_pnl": 0.027329915440629994,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 3.5935572772422275,
+            "pnl_plus_hypothetical_fees_usd": -2.42399916738121,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 0.7187859602924214,
+            "pnl_plus_hypothetical_fees_usd": -5.298770484331016,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.17969998299298995,
+            "pnl_plus_hypothetical_fees_usd": -5.837856461630448,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 6.0175564446234375,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -10.626837738552098,
+        "return_excluding_lp_fees_pct": -5.313418869276049,
+        "max_drawdown_pct": 5.313418869276049,
+        "lp_active_hours": 85.0,
+        "lp_operations": 24,
+        "hedge_fees": 0.7567333649999999,
+        "swap_costs": 3.3562955884668275,
+        "operation_costs": 2.400000000000001,
+        "funding_pnl": 0.025436678040860992,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 10.889053913649224,
+            "pnl_plus_hypothetical_fees_usd": 0.2622161750971266,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.1780087099347583,
+            "pnl_plus_hypothetical_fees_usd": -8.44882902861734,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.5445114564634705,
+            "pnl_plus_hypothetical_fees_usd": -10.082326282088626,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.626837738552098,
+        "phase": "Halted"
+      }
+    },
+    {
+      "wide": 0.012,
+      "narrow": 0.004,
+      "inside_hedge_ratio": 1.0,
+      "train_score": -32.522703905808385,
+      "initial_rent_budget_feasible": true,
+      "initial_rent_plus_gas_reserve_usd": 9.054015083030693,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -10.840901301936128,
+        "return_excluding_lp_fees_pct": -5.420450650968064,
+        "max_drawdown_pct": 5.420450650968064,
+        "lp_active_hours": 53.0,
+        "lp_operations": 21,
+        "hedge_fees": 0.8590127174999999,
+        "swap_costs": 2.7194128662715356,
+        "operation_costs": 2.1000000000000005,
+        "funding_pnl": 0.018432226630869002,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 13.914026611224054,
+            "pnl_plus_hypothetical_fees_usd": 3.073125309287926,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.7835715155617873,
+            "pnl_plus_hypothetical_fees_usd": -8.057329786374341,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.6959288082544507,
+            "pnl_plus_hypothetical_fees_usd": -10.144972493681678,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.840901301936128,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -7.99720150198911,
+        "return_excluding_lp_fees_pct": -3.9986007509945547,
+        "max_drawdown_pct": 3.9986007509945547,
+        "lp_active_hours": 84.0,
+        "lp_operations": 18,
+        "hedge_fees": 0.9556105799999999,
+        "swap_costs": 2.8260139113650187,
+        "operation_costs": 1.8000000000000005,
+        "funding_pnl": 0.028905748026380015,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 8.49952409071397,
+            "pnl_plus_hypothetical_fees_usd": 0.5023225887248604,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.700424831639289,
+            "pnl_plus_hypothetical_fees_usd": -6.296776670349821,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.42513059442073525,
+            "pnl_plus_hypothetical_fees_usd": -7.572070907568375,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 7.99720150198911,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -10.840901301936128,
+        "return_excluding_lp_fees_pct": -5.420450650968064,
+        "max_drawdown_pct": 5.420450650968064,
+        "lp_active_hours": 53.0,
+        "lp_operations": 21,
+        "hedge_fees": 0.8590127174999999,
+        "swap_costs": 2.7194128662715356,
+        "operation_costs": 2.1000000000000005,
+        "funding_pnl": 0.018432226630869002,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 13.914026611224054,
+            "pnl_plus_hypothetical_fees_usd": 3.073125309287926,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.7835715155617873,
+            "pnl_plus_hypothetical_fees_usd": -8.057329786374341,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.6959288082544507,
+            "pnl_plus_hypothetical_fees_usd": -10.144972493681678,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.840901301936128,
+        "phase": "Halted"
+      }
+    },
+    {
+      "wide": 0.04,
+      "narrow": 0.012,
+      "inside_hedge_ratio": 0.0,
+      "train_score": -34.49458979483576,
+      "initial_rent_budget_feasible": true,
+      "initial_rent_plus_gas_reserve_usd": 14.699071780978569,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -10.801514070809645,
+        "return_excluding_lp_fees_pct": -5.400757035404823,
+        "max_drawdown_pct": 5.923268931006529,
+        "lp_active_hours": 104.0,
+        "lp_operations": 25,
+        "hedge_fees": 0.8733542025000002,
+        "swap_costs": 3.8425917586980924,
+        "operation_costs": 2.500000000000001,
+        "funding_pnl": 0.00372219532091,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 13.160765455645098,
+            "pnl_plus_hypothetical_fees_usd": 2.359251384835453,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.6324084197127466,
+            "pnl_plus_hypothetical_fees_usd": -8.1691056510969,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.6581140750367486,
+            "pnl_plus_hypothetical_fees_usd": -10.143399995772898,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.801514070809645,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -5.763279784510274,
+        "return_excluding_lp_fees_pct": -2.881639892255137,
+        "max_drawdown_pct": 3.4397367529036984,
+        "lp_active_hours": 84.0,
+        "lp_operations": 17,
+        "hedge_fees": 0.5539270500000002,
+        "swap_costs": 2.487809334062108,
+        "operation_costs": 1.7000000000000004,
+        "funding_pnl": 0.00116549555375,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 3.5935572772422275,
+            "pnl_plus_hypothetical_fees_usd": -2.169722507268047,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 0.7187859602924214,
+            "pnl_plus_hypothetical_fees_usd": -5.044493824217853,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.17969998299298995,
+            "pnl_plus_hypothetical_fees_usd": -5.583579801517285,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 5.763279784510274,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -10.801514070809645,
+        "return_excluding_lp_fees_pct": -5.400757035404823,
+        "max_drawdown_pct": 5.923268931006529,
+        "lp_active_hours": 104.0,
+        "lp_operations": 25,
+        "hedge_fees": 0.8733542025000002,
+        "swap_costs": 3.8425917586980924,
+        "operation_costs": 2.500000000000001,
+        "funding_pnl": 0.00372219532091,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 13.160765455645098,
+            "pnl_plus_hypothetical_fees_usd": 2.359251384835453,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 2.6324084197127466,
+            "pnl_plus_hypothetical_fees_usd": -8.1691056510969,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.6581140750367486,
+            "pnl_plus_hypothetical_fees_usd": -10.143399995772898,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.801514070809645,
+        "phase": "Halted"
+      }
+    },
+    {
+      "wide": 0.08,
+      "narrow": 0.02,
+      "inside_hedge_ratio": 0.0,
+      "train_score": -29.656704375130722,
+      "initial_rent_budget_feasible": false,
+      "initial_rent_plus_gas_reserve_usd": 24.282540128657523,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -8.565672601005872,
+        "return_excluding_lp_fees_pct": -4.282836300502936,
+        "max_drawdown_pct": 5.272757943531213,
+        "lp_active_hours": 103.0,
+        "lp_operations": 25,
+        "hedge_fees": 0.9114159900000004,
+        "swap_costs": 3.9174348737854046,
+        "operation_costs": 2.500000000000001,
+        "funding_pnl": 0.00143150845712,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 8.715465898281726,
+            "pnl_plus_hypothetical_fees_usd": 0.14979329727585444,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.7432018112426482,
+            "pnl_plus_hypothetical_fees_usd": -6.822470789763224,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.435805545334438,
+            "pnl_plus_hypothetical_fees_usd": -8.129867055671435,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 8.565672601005872,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -4.930701018090502,
+        "return_excluding_lp_fees_pct": -2.465350509045251,
+        "max_drawdown_pct": 3.2471980702892154,
+        "lp_active_hours": 84.0,
+        "lp_operations": 16,
+        "hedge_fees": 0.513080475,
+        "swap_costs": 2.3841167902015283,
+        "operation_costs": 1.6000000000000003,
+        "funding_pnl": 0.00107853611986,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 2.172228478068308,
+            "pnl_plus_hypothetical_fees_usd": -2.7584725400221943,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 0.43447307323830997,
+            "pnl_plus_hypothetical_fees_usd": -4.496227944852192,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.10861955174724225,
+            "pnl_plus_hypothetical_fees_usd": -4.82208146634326,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 4.930701018090502,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -8.565672601005872,
+        "return_excluding_lp_fees_pct": -4.282836300502936,
+        "max_drawdown_pct": 5.272757943531213,
+        "lp_active_hours": 103.0,
+        "lp_operations": 25,
+        "hedge_fees": 0.9114159900000004,
+        "swap_costs": 3.9174348737854046,
+        "operation_costs": 2.500000000000001,
+        "funding_pnl": 0.00143150845712,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 8.715465898281726,
+            "pnl_plus_hypothetical_fees_usd": 0.14979329727585444,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.7432018112426482,
+            "pnl_plus_hypothetical_fees_usd": -6.822470789763224,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.435805545334438,
+            "pnl_plus_hypothetical_fees_usd": -8.129867055671435,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 8.565672601005872,
+        "phase": "Halted"
+      }
+    },
+    {
+      "wide": 0.08,
+      "narrow": 0.02,
+      "inside_hedge_ratio": 0.5,
+      "train_score": -30.009413437280013,
+      "initial_rent_budget_feasible": false,
+      "initial_rent_plus_gas_reserve_usd": 24.282540128657523,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -9.894306875105258,
+        "return_excluding_lp_fees_pct": -4.947153437552629,
+        "max_drawdown_pct": 5.028776640543689,
+        "lp_active_hours": 107.0,
+        "lp_operations": 27,
+        "hedge_fees": 0.587372115,
+        "swap_costs": 4.056423817026438,
+        "operation_costs": 2.700000000000001,
+        "funding_pnl": 0.01763741773938,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 8.83776459115861,
+            "pnl_plus_hypothetical_fees_usd": -1.0565422839466478,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.7676622731876523,
+            "pnl_plus_hypothetical_fees_usd": -8.126644601917606,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.4419206947298532,
+            "pnl_plus_hypothetical_fees_usd": -9.452386180375404,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 9.894306875105258,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -5.132962747415576,
+        "return_excluding_lp_fees_pct": -2.566481373707788,
+        "max_drawdown_pct": 2.7650620618274786,
+        "lp_active_hours": 84.0,
+        "lp_operations": 16,
+        "hedge_fees": 0.359755275,
+        "swap_costs": 2.3841167902015283,
+        "operation_costs": 1.6000000000000003,
+        "funding_pnl": 0.011891606794790004,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 2.172228478068308,
+            "pnl_plus_hypothetical_fees_usd": -2.9607342693472676,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 0.43447307323830997,
+            "pnl_plus_hypothetical_fees_usd": -4.6984896741772655,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.10861955174724225,
+            "pnl_plus_hypothetical_fees_usd": -5.024343195668333,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 5.132962747415576,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -9.894306875105258,
+        "return_excluding_lp_fees_pct": -4.947153437552629,
+        "max_drawdown_pct": 5.028776640543689,
+        "lp_active_hours": 107.0,
+        "lp_operations": 27,
+        "hedge_fees": 0.587372115,
+        "swap_costs": 4.056423817026438,
+        "operation_costs": 2.700000000000001,
+        "funding_pnl": 0.01763741773938,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 8.83776459115861,
+            "pnl_plus_hypothetical_fees_usd": -1.0565422839466478,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.7676622731876523,
+            "pnl_plus_hypothetical_fees_usd": -8.126644601917606,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.4419206947298532,
+            "pnl_plus_hypothetical_fees_usd": -9.452386180375404,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 9.894306875105258,
+        "phase": "Halted"
+      }
+    },
+    {
+      "wide": 0.08,
+      "narrow": 0.02,
+      "inside_hedge_ratio": 1.0,
+      "train_score": -31.33786530201735,
+      "initial_rent_budget_feasible": false,
+      "initial_rent_plus_gas_reserve_usd": 24.282540128657523,
+      "train_21_days": {
+        "start_ms": 1787126400000,
+        "end_ms": 1788940800000,
+        "observations": 504,
+        "pnl_excluding_lp_fees": -10.44595510067245,
+        "return_excluding_lp_fees_pct": -5.222977550336225,
+        "max_drawdown_pct": 5.222977550336225,
+        "lp_active_hours": 97.0,
+        "lp_operations": 25,
+        "hedge_fees": 0.7074679050000001,
+        "swap_costs": 3.7979776746474534,
+        "operation_costs": 2.500000000000001,
+        "funding_pnl": 0.032386820154191996,
+        "fee_data_missing_bars": 71,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 7.973183259281873,
+            "pnl_plus_hypothetical_fees_usd": -2.4727718413905766,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.5947322751681194,
+            "pnl_plus_hypothetical_fees_usd": -8.85122282550433,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.3986875514894854,
+            "pnl_plus_hypothetical_fees_usd": -10.047267549182964,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.44595510067245,
+        "phase": "Halted"
+      },
+      "test_9_days": {
+        "start_ms": 1788940800000,
+        "end_ms": 1789718400000,
+        "observations": 216,
+        "pnl_excluding_lp_fees": -5.127003325370168,
+        "return_excluding_lp_fees_pct": -2.563501662685084,
+        "max_drawdown_pct": 2.563501662685084,
+        "lp_active_hours": 84.0,
+        "lp_operations": 16,
+        "hedge_fees": 0.39870835499999996,
+        "swap_costs": 2.3841167902015283,
+        "operation_costs": 1.6000000000000003,
+        "funding_pnl": 0.026564108840199996,
+        "fee_data_missing_bars": 32,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 2.172228478068308,
+            "pnl_plus_hypothetical_fees_usd": -2.9547748473018602,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 0.43447307323830997,
+            "pnl_plus_hypothetical_fees_usd": -4.692530252131858,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.10861955174724225,
+            "pnl_plus_hypothetical_fees_usd": -5.018383773622926,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 5.127003325370168,
+        "phase": "Active"
+      },
+      "month": {
+        "start_ms": 1787126400000,
+        "end_ms": 1789718400000,
+        "observations": 720,
+        "pnl_excluding_lp_fees": -10.44595510067245,
+        "return_excluding_lp_fees_pct": -5.222977550336225,
+        "max_drawdown_pct": 5.222977550336225,
+        "lp_active_hours": 97.0,
+        "lp_operations": 25,
+        "hedge_fees": 0.7074679050000001,
+        "swap_costs": 3.7979776746474534,
+        "operation_costs": 2.500000000000001,
+        "funding_pnl": 0.032386820154191996,
+        "fee_data_missing_bars": 103,
+        "fee_sensitivity": [
+          {
+            "assumed_other_active_bin_capital_usd": 5000.0,
+            "hypothetical_personal_fees_usd": 7.973183259281873,
+            "pnl_plus_hypothetical_fees_usd": -2.4727718413905766,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 25000.0,
+            "hypothetical_personal_fees_usd": 1.5947322751681194,
+            "pnl_plus_hypothetical_fees_usd": -8.85122282550433,
+            "missing_fee_periods_excluded": true
+          },
+          {
+            "assumed_other_active_bin_capital_usd": 100000.0,
+            "hypothetical_personal_fees_usd": 0.3986875514894854,
+            "pnl_plus_hypothetical_fees_usd": -10.047267549182964,
+            "missing_fee_periods_excluded": true
+          }
+        ],
+        "break_even_fee_usd": 10.44595510067245,
+        "phase": "Halted"
+      }
+    }
+  ],
+  "selected_fine_overlap": {
+    "start_ms": 1788219900000,
+    "end_ms": 1789718400000,
+    "observations": 4995,
+    "pnl_excluding_lp_fees": -10.190787003372947,
+    "return_excluding_lp_fees_pct": -5.095393501686473,
+    "max_drawdown_pct": 5.095393501686473,
+    "lp_active_hours": 100.16666666666534,
+    "lp_operations": 21,
+    "hedge_fees": 1.0687389299999999,
+    "swap_costs": 2.867191826301616,
+    "operation_costs": 2.1000000000000005,
+    "funding_pnl": 0.02970147587761,
+    "fee_data_missing_bars": 60,
+    "fee_sensitivity": [
+      {
+        "assumed_other_active_bin_capital_usd": 5000.0,
+        "hypothetical_personal_fees_usd": 9.548628383237165,
+        "pnl_plus_hypothetical_fees_usd": -0.6421586201357812,
+        "missing_fee_periods_excluded": true
+      },
+      {
+        "assumed_other_active_bin_capital_usd": 25000.0,
+        "hypothetical_personal_fees_usd": 1.9100759862706014,
+        "pnl_plus_hypothetical_fees_usd": -8.280711017102345,
+        "missing_fee_periods_excluded": true
+      },
+      {
+        "assumed_other_active_bin_capital_usd": 100000.0,
+        "hypothetical_personal_fees_usd": 0.4775354215088856,
+        "pnl_plus_hypothetical_fees_usd": -9.71325158186406,
+        "missing_fee_periods_excluded": true
+      }
+    ],
+    "break_even_fee_usd": 10.190787003372947,
+    "phase": "Halted"
+  },
+  "selected_maker_fee_optimistic": {
+    "start_ms": 1787126400000,
+    "end_ms": 1789718400000,
+    "observations": 720,
+    "pnl_excluding_lp_fees": -10.440224368520887,
+    "return_excluding_lp_fees_pct": -5.220112184260444,
+    "max_drawdown_pct": 5.220112184260444,
+    "lp_active_hours": 85.0,
+    "lp_operations": 28,
+    "hedge_fees": 0.14591775899999995,
+    "swap_costs": 3.8948729738643966,
+    "operation_costs": 2.800000000000001,
+    "funding_pnl": 0.013870346945175005,
+    "fee_data_missing_bars": 103,
+    "fee_sensitivity": [
+      {
+        "assumed_other_active_bin_capital_usd": 5000.0,
+        "hypothetical_personal_fees_usd": 13.792478940603196,
+        "pnl_plus_hypothetical_fees_usd": 3.352254572082309,
+        "missing_fee_periods_excluded": true
+      },
+      {
+        "assumed_other_active_bin_capital_usd": 25000.0,
+        "hypothetical_personal_fees_usd": 2.758852414586685,
+        "pnl_plus_hypothetical_fees_usd": -7.681371953934202,
+        "missing_fee_periods_excluded": true
+      },
+      {
+        "assumed_other_active_bin_capital_usd": 100000.0,
+        "hypothetical_personal_fees_usd": 0.6897298236754474,
+        "pnl_plus_hypothetical_fees_usd": -9.75049454484544,
+        "missing_fee_periods_excluded": true
+      }
+    ],
+    "break_even_fee_usd": 10.440224368520887,
+    "phase": "Halted"
+  },
+  "cash_baseline_pnl": 0.0
+}
