@@ -4,6 +4,7 @@ pub mod events;
 pub(crate) use crate::evm::{fees, nonce, rpc};
 pub mod mint;
 pub mod quote;
+pub mod slippage;
 pub mod tx;
 use crate::{
     config::LiquidityConfig,
@@ -28,6 +29,50 @@ pub struct UniswapV3 {
     pub quote: Address,
 }
 impl UniswapV3 {
+    async fn snapshot_at(&self, number: u64) -> Result<PoolSnapshot> {
+        let tag = format!("0x{number:x}");
+        let header = self
+            .rpc
+            .request("eth_getBlockByNumber", json!([tag, false]))
+            .await?;
+        let slot = self.rpc.words(self.pool, "slot0()", &[], &tag).await?;
+        ensure!(
+            slot.len() == 7 && slot[6] != U256::ZERO,
+            "uninitialized/locked pool"
+        );
+        let l = self.rpc.words(self.pool, "liquidity()", &[], &tag).await?[0];
+        let spacing = signed_tick(
+            self.rpc
+                .words(self.pool, "tickSpacing()", &[], &tag)
+                .await?[0],
+        );
+        let base0 = self.base < self.quote;
+        let sqrt = slot[0].to_string().parse::<f64>()? / 2_f64.powi(96);
+        let raw = sqrt * sqrt;
+        let price = (if base0 { raw } else { 1.0 / raw })
+            * 10_f64.powi(self.cfg.base_decimals as i32 - self.cfg.quote_decimals as i32);
+        ensure!(
+            price.is_finite() && price > 0.0 && spacing > 0 && l > U256::ZERO,
+            "invalid pool state"
+        );
+        Ok(PoolSnapshot {
+            block: number,
+            block_hash: header["hash"].as_str().context("block hash")?.into(),
+            time_ms: rpc::hex_u64(&header["timestamp"])? * 1000,
+            price,
+            tick: signed_tick(slot[1]),
+            tick_spacing: spacing,
+            liquidity: l.to_string(),
+            sqrt_price_x96: slot[0].to_string(),
+            base_is_token0: base0,
+        })
+    }
+
+    /// 监控/记账仍使用确认块；发送交易前报价单独读取最新块，避免确认延迟造成旧报价。
+    pub async fn execution_snapshot(&self) -> Result<PoolSnapshot> {
+        self.snapshot_at(self.rpc.block_number().await?).await
+    }
+
     pub fn new(cfg: LiquidityConfig) -> Result<Self> {
         Ok(Self {
             rpc: Rpc::new(cfg.rpc_url.clone())?,
@@ -278,42 +323,7 @@ impl LiquidityVenue for UniswapV3 {
             .block_number()
             .await?
             .saturating_sub(self.cfg.confirmations);
-        let tag = format!("0x{number:x}");
-        let header = self
-            .rpc
-            .request("eth_getBlockByNumber", json!([tag, false]))
-            .await?;
-        let slot = self.rpc.words(self.pool, "slot0()", &[], &tag).await?;
-        ensure!(
-            slot.len() == 7 && slot[6] != U256::ZERO,
-            "uninitialized/locked pool"
-        );
-        let l = self.rpc.words(self.pool, "liquidity()", &[], &tag).await?[0];
-        let spacing = signed_tick(
-            self.rpc
-                .words(self.pool, "tickSpacing()", &[], &tag)
-                .await?[0],
-        );
-        let base0 = self.base < self.quote;
-        let sqrt = slot[0].to_string().parse::<f64>()? / 2_f64.powi(96);
-        let raw = sqrt * sqrt;
-        let price = (if base0 { raw } else { 1.0 / raw })
-            * 10_f64.powi(self.cfg.base_decimals as i32 - self.cfg.quote_decimals as i32);
-        ensure!(
-            price.is_finite() && price > 0.0 && spacing > 0 && l > U256::ZERO,
-            "invalid pool state"
-        );
-        Ok(PoolSnapshot {
-            block: number,
-            block_hash: header["hash"].as_str().context("block hash")?.into(),
-            time_ms: rpc::hex_u64(&header["timestamp"])? * 1000,
-            price,
-            tick: signed_tick(slot[1]),
-            tick_spacing: spacing,
-            liquidity: l.to_string(),
-            sqrt_price_x96: slot[0].to_string(),
-            base_is_token0: base0,
-        })
+        self.snapshot_at(number).await
     }
     async fn positions(&self, owner: &str, ids: &[(String, String)]) -> Result<Vec<LpPosition>> {
         let snap = self.snapshot().await?;

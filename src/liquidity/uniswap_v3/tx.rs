@@ -3,7 +3,8 @@ use super::{
     abi::{IERC20, INfpm, IRouter02},
     fees::Fees,
     raw_units,
-    rpc::{address_word, hex_u64},
+    rpc::{address_word, hex_u64, signed_tick, word_address},
+    slippage::{self, Range, parse_sqrt},
 };
 use crate::{
     domain::{LiquidityVenue, LpPosition},
@@ -86,6 +87,48 @@ impl crate::domain::LiquidityExecutor for Executor {
     }
 }
 impl Executor {
+    /// NFT 的精确 tick 必须来自合约，不能把展示用浮点价格反算为整数 tick。
+    async fn position_range(&self, id: U256, block: u64) -> Result<(Range, U256)> {
+        let p = self
+            .venue
+            .position_words(id, &format!("0x{block:x}"))
+            .await?;
+        let (token0, token1) = if self.venue.base < self.venue.quote {
+            (self.venue.base, self.venue.quote)
+        } else {
+            (self.venue.quote, self.venue.base)
+        };
+        ensure!(
+            word_address(p[2]) == token0
+                && word_address(p[3]) == token1
+                && p[4] == U256::from(self.venue.cfg.fee),
+            "LP NFT pool mismatch"
+        );
+        Ok((Range::new(signed_tick(p[5]), signed_tick(p[6]))?, p[7]))
+    }
+
+    /// 两笔 approve 可能耗时多个区块。额度和 tick 固定，只刷新执行价格及最小量。
+    async fn refreshed_entry_snapshot(
+        &self,
+        before: &crate::domain::PoolSnapshot,
+    ) -> Result<crate::domain::PoolSnapshot> {
+        let after = self.venue.execution_snapshot().await?;
+        slippage::check_price_move(
+            parse_sqrt(&before.sqrt_price_x96)?,
+            parse_sqrt(&after.sqrt_price_x96)?,
+            self.venue.cfg.slippage_bps,
+        )?;
+        tracing::info!(
+            old_block = before.block,
+            block = after.block,
+            old_price = before.price,
+            price = after.price,
+            slippage_bps = self.venue.cfg.slippage_bps,
+            "LP 授权已完成，已刷新执行报价；投入上限和区间保持原计划"
+        );
+        Ok(after)
+    }
+
     /// Base 处理池费和报价变化造成的余额尾差；原 Robinhood 路径无额外 RPC。
     async fn funded_liquidity_amounts(&self, rb: U256, rq: U256) -> Result<(U256, U256)> {
         Ok(
@@ -106,7 +149,9 @@ impl Executor {
         )
     }
     pub async fn increase(&self, position: &LpPosition, value: f64) -> Result<Value> {
-        let snap = self.venue.snapshot().await?;
+        let snap = self.venue.execution_snapshot().await?;
+        let id = U256::from_str_radix(position.token_id.as_deref().context("NFT id")?, 10)?;
+        let (range, _) = self.position_range(id, snap.block).await?;
         ensure!(
             snap.price > position.lower && snap.price < position.upper,
             "cannot scale an out-of-range position"
@@ -122,24 +167,30 @@ impl Executor {
             .await?;
         self.approve(self.venue.quote, self.venue.manager, rq)
             .await?;
+        let snap = self.refreshed_entry_snapshot(&snap).await?;
         let (a0, a1) = if snap.base_is_token0 {
             (rb, rq)
         } else {
             (rq, rb)
         };
-        let min = |a: U256| a * U256::from(10000 - self.venue.cfg.slippage_bps) / U256::from(10000);
+        let (min0, min1) = range.mint_minimums(
+            parse_sqrt(&snap.sqrt_price_x96)?,
+            a0,
+            a1,
+            self.venue.cfg.slippage_bps,
+        )?;
         let params = INfpm::IncreaseLiquidityParams {
-            tokenId: U256::from_str_radix(position.token_id.as_deref().context("NFT id")?, 10)?,
+            tokenId: id,
             amount0Desired: a0,
             amount1Desired: a1,
-            amount0Min: min(a0),
-            amount1Min: min(a1),
+            amount0Min: min0,
+            amount1Min: min1,
             deadline: U256::from(crate::now_ms() / 1000 + self.venue.cfg.deadline_seconds),
         };
         self.send(
             self.venue.manager,
             INfpm::increaseLiquidityCall { params }.abi_encode(),
-            json!({"kind":"increase","layer":position.layer,"token_id":position.token_id,"value_usdg":value,"lower":position.lower,"upper":position.upper,"price":snap.price,"quote_time_ms":snap.time_ms}),
+            json!({"kind":"increase","layer":position.layer,"token_id":position.token_id,"value_usdg":value,"lower":position.lower,"upper":position.upper,"price":snap.price,"quote_time_ms":snap.time_ms,"quote_block":snap.block,"amount0_min":min0.to_string(),"amount1_min":min1.to_string(),"slippage_bps":self.venue.cfg.slippage_bps}),
         )
         .await
     }
@@ -292,9 +343,11 @@ impl Executor {
         );
         let nonce = self.nonce.next().await?;
         let call = json!({"from":self.owner(),"to":to,"data":format!("0x{}",hex::encode(&data)),"value":"0x0"});
-        rpc.request("eth_call", json!([call, "latest"]))
-            .await
-            .context("transaction simulation reverted")?;
+        if let Err(error) = rpc.request("eth_call", json!([call, "latest"])).await {
+            tracing::error!(nonce, operation=%operation, error=%error,
+                "EVM 预检失败：本次交易尚未签名或广播；此前步骤可能已完成，请保留状态");
+            return Err(error.context("transaction simulation failed before signing/broadcast; earlier workflow operations may have completed"));
+        }
         let estimated_gas = hex_u64(&rpc.request("eth_estimateGas", json!([call])).await?)?;
         let gas = u64::try_from(super::fees::buffered(
             u128::from(estimated_gas),
@@ -527,7 +580,7 @@ impl Executor {
             !self.ids()?.iter().any(|(l, _)| l == layer),
             "layer already has an NFT"
         );
-        let snap = self.venue.snapshot().await?;
+        let snap = self.venue.execution_snapshot().await?;
         let (lo, hi) = math::range(snap.price, width);
         let (tl, tu) = math::aligned_ticks(
             lo,
@@ -563,12 +616,18 @@ impl Executor {
             .await?;
         self.approve(self.venue.quote, self.venue.manager, rq)
             .await?;
+        let snap = self.refreshed_entry_snapshot(&snap).await?;
         let (t0, t1, a0, a1) = if snap.base_is_token0 {
             (self.venue.base, self.venue.quote, rb, rq)
         } else {
             (self.venue.quote, self.venue.base, rq, rb)
         };
-        let min = |a: U256| a * U256::from(10000 - self.venue.cfg.slippage_bps) / U256::from(10000);
+        let (min0, min1) = Range::new(tl, tu)?.mint_minimums(
+            parse_sqrt(&snap.sqrt_price_x96)?,
+            a0,
+            a1,
+            self.venue.cfg.slippage_bps,
+        )?;
         let params = INfpm::MintParams {
             token0: t0,
             token1: t1,
@@ -577,15 +636,15 @@ impl Executor {
             tickUpper: I24::try_from(tu)?,
             amount0Desired: a0,
             amount1Desired: a1,
-            amount0Min: min(a0),
-            amount1Min: min(a1),
+            amount0Min: min0,
+            amount1Min: min1,
             recipient: self.owner(),
             deadline: U256::from(crate::now_ms() / 1000 + self.venue.cfg.deadline_seconds),
         };
         self.send(
             self.venue.manager,
             INfpm::mintCall { params }.abi_encode(),
-            json!({"kind":"mint","layer":layer,"value_usdg":value,"half_width":width,"tick_lower":tl,"tick_upper":tu,"raw_base":rb.to_string(),"raw_quote":rq.to_string(),"price":snap.price,"quote_time_ms":snap.time_ms}),
+            json!({"kind":"mint","layer":layer,"value_usdg":value,"half_width":width,"tick_lower":tl,"tick_upper":tu,"raw_base":rb.to_string(),"raw_quote":rq.to_string(),"price":snap.price,"quote_time_ms":snap.time_ms,"quote_block":snap.block,"amount0_min":min0.to_string(),"amount1_min":min1.to_string(),"slippage_bps":self.venue.cfg.slippage_bps}),
         )
         .await
     }
@@ -610,19 +669,19 @@ impl Executor {
                 .context("live position needs token id")?,
             10,
         )?;
-        let snap = self.venue.snapshot().await?;
-        let (base, quote) = math::amounts(pos.liquidity, pos.lower, pos.upper, snap.price);
-        let (rb, rq) = (
-            raw_units(base, self.venue.cfg.base_decimals)?,
-            raw_units(quote, self.venue.cfg.quote_decimals)?,
+        let snap = self.venue.execution_snapshot().await?;
+        let (range, current_liquidity) = self.position_range(id, snap.block).await?;
+        let raw_liquidity = U256::from_str_radix(&pos.raw_liquidity, 10)?;
+        ensure!(
+            raw_liquidity == current_liquidity,
+            "LP liquidity changed since observation; reconcile before removal"
         );
-        let (a0, a1) = if snap.base_is_token0 {
-            (rb, rq)
-        } else {
-            (rq, rb)
-        };
-        let min = |a: U256| a * U256::from(10000 - self.venue.cfg.slippage_bps) / U256::from(10000);
-        let raw = U256::from_str_radix(&pos.raw_liquidity, 10)?.to::<u128>();
+        let (min0, min1) = range.burn_minimums(
+            parse_sqrt(&snap.sqrt_price_x96)?,
+            raw_liquidity,
+            self.venue.cfg.slippage_bps,
+        )?;
+        let raw = raw_liquidity.to::<u128>();
         let mut calls = vec![];
         if raw > 0 {
             calls.push(Bytes::from(
@@ -630,8 +689,8 @@ impl Executor {
                     params: INfpm::DecreaseLiquidityParams {
                         tokenId: id,
                         liquidity: raw,
-                        amount0Min: min(a0),
-                        amount1Min: min(a1),
+                        amount0Min: min0,
+                        amount1Min: min1,
                         deadline: U256::from(
                             crate::now_ms() / 1000 + self.venue.cfg.deadline_seconds,
                         ),
@@ -655,7 +714,7 @@ impl Executor {
         self.send(
             self.venue.manager,
             INfpm::multicallCall { data: calls }.abi_encode(),
-            json!({"kind":"burn","layer":pos.layer,"token_id":pos.token_id,"raw_liquidity":pos.raw_liquidity,"lower":pos.lower,"upper":pos.upper,"price":snap.price,"quote_time_ms":snap.time_ms}),
+            json!({"kind":"burn","layer":pos.layer,"token_id":pos.token_id,"raw_liquidity":pos.raw_liquidity,"lower":pos.lower,"upper":pos.upper,"price":snap.price,"quote_time_ms":snap.time_ms,"quote_block":snap.block,"amount0_min":min0.to_string(),"amount1_min":min1.to_string(),"slippage_bps":self.venue.cfg.slippage_bps}),
         )
         .await
     }

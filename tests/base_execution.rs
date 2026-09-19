@@ -9,12 +9,12 @@ use alloy::{
 use lp_maker::{
     config::Config,
     domain::{LiquidityVenue, LpPosition},
-    evm::rpc::tick_word,
+    evm::rpc::{address_word, tick_word},
     liquidity::{
         self,
         uniswap_v3::{
             abi::{INfpm, IRouter02},
-            raw_units,
+            slippage::{Range, parse_sqrt},
             tx::Executor,
         },
     },
@@ -43,6 +43,7 @@ struct Chain {
     receipts: BTreeMap<String, Value>,
     base: U256,
     quote: U256,
+    position: Vec<U256>,
 }
 
 /// End-to-end signed calldata test against a loopback node: swap, mint, restart, withdraw.
@@ -78,6 +79,7 @@ async fn base_swap_mint_restart_and_remove_keep_correct_addresses_fee_ticks_and_
                 else if has(&data,"tickSpacing()") {words(&[U256::from(60)])}
                 else if has(&data,"balanceOf(address)") {words(&[if to==base{s.base}else{assert_eq!(to,quote);s.quote}])}
                 else if has(&data,"allowance(address,address)") {words(&[U256::MAX])}
+                else if has(&data,"positions(uint256)") {words(&s.position)}
                 else if has(&data,"getL1FeeUpperBound(uint256)")||has(&data,"getOperatorFee(uint256)") {words(&[U256::from(100)])}
                 else if has(&data,"quoteExactInputSingle((address,address,uint256,uint24,uint160))") {
                     assert_eq!(U256::from_be_slice(&data[100..132]),U256::from(3000));
@@ -106,6 +108,11 @@ async fn base_swap_mint_restart_and_remove_keep_correct_addresses_fee_ticks_and_
                         assert_eq!(mint.params.tickLower.as_i32()%60,0);assert_eq!(mint.params.tickUpper.as_i32()%60,0);
                         assert!(mint.params.amount0Desired<=s.base && mint.params.amount1Desired<=s.quote);
                         assert!(mint.params.amount0Min>U256::ZERO && mint.params.amount1Min>U256::ZERO);
+                        let liquidity = Range::new(mint.params.tickLower.as_i32(), mint.params.tickUpper.as_i32()).unwrap()
+                            .liquidity(parse_sqrt("3953120541360100857610261").unwrap(), mint.params.amount0Desired, mint.params.amount1Desired).unwrap();
+                        s.position = vec![U256::ZERO, U256::ZERO, address_word(base), address_word(quote), U256::from(3000),
+                            tick_word(mint.params.tickLower.as_i32()), tick_word(mint.params.tickUpper.as_i32()), liquidity,
+                            U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO];
                         s.base-=mint.params.amount0Desired;s.quote-=mint.params.amount1Desired;
                         logs.push(json!({"address":manager,"topics":[format!("{:#x}",keccak256("Transfer(address,address,uint256)")),format!("0x{:064x}",U256::ZERO),format!("0x{:0>64}",hex::encode(mint.params.recipient)),format!("0x{:064x}",U256::from(42))]}));
                     } else {
@@ -153,7 +160,7 @@ async fn base_swap_mint_restart_and_remove_keep_correct_addresses_fee_ticks_and_
         lower,
         upper,
         liquidity: l,
-        raw_liquidity: raw_units(l, 12).unwrap().to_string(),
+        raw_liquidity: state.lock().unwrap().position[7].to_string(),
         unclaimed_base: 0.0,
         unclaimed_quote: 0.0,
         base: b,

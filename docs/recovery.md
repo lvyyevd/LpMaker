@@ -94,6 +94,18 @@ cargo build --release --locked
 
 空仓新增 LP 前会先读取 Hyperliquid 的实际账户权益及可用保证金。以 `LP 预算 × 建仓比例 / 杠杆 / 0.9` 检查保证金余量，并同时受配置的保证金预算限制；不足时记录 `entry_waiting_hedge_collateral`，不买入 WETH、不铸造 LP，保持等待并在下一轮重新检查。已有风险库存仍可退出到稳定币，执行对冲前仍再次检查保证金。200 美元配置的 LP 预算为 120、杠杆为 3 时，这项前置门槛约为 44.45 USDC；配置的 60 美元保证金应实际存入 Hyperliquid，仅填写配置不会产生资金。
 
+## V3 的 `Price slippage check`
+
+该错误表示 NFPM 实际使用/返还的某一种币少于 calldata 中的最低数量。它可能出现在 mint、increase 或 decrease，需结合前面的 `EVM operation started` 中 `kind`、`layer` 和 `token_id` 定位具体步骤；单独这一行不能证明整个建仓流程都未执行。
+
+LP 最低量按 V3 流动性公式和价格滑点边界计算，不再对两种计划投入量各自简单打折。新增/追加使用向上取整，撤出使用向下取整；以原始流动性、精确 tick 和 Q64.96 运算，适配不同代币精度和排序。算法对应 [官方 SDK 的 Position 滑点计算](https://github.com/Uniswap/v3-sdk/blob/main/src/entities/position.ts)，测试包含官方 SDK 生成的固定向量。窄区间的币种比例会放大价格变化，最低代币数量的变化百分比不等于配置的价格滑点百分比。
+
+交易报价使用最新区块，监控和会计仍使用确认块。mint/increase 授权完成后再刷新一次价格，保持原 tick 区间和代币投入上限；授权期间价格超出配置滑点或已离开原区间就停止，不继续追价、不追加换币。撤出时重新核对链上 NFT 的精确 tick、币对和原始流动性，发现数量改变则要求重新对账。新日志包含报价块号、最低代币数量和滑点配置。
+
+若日志明确指出 **`transaction simulation failed before signing/broadcast`**，说明当前这笔调用尚未签名/广播，不会新增 pending 或占用新 nonce；已完成的 approve、swap、其他层 NFT 仍然有效。它与广播后结果未知不同：后者仍持久化并阻止重复发送。价格在报价后继续变化仍可能合理触发滑点保护，程序不会自动提高滑点或重复发送。
+
+更新后沿用原配置、`.env` 和完整状态目录正常重启。若存在未完成 `workflow.json`，依旧先对账并按原规则退出遗留风险，再进入暂停恢复；本次修复不自动续建剩余层、不删除旧仓、不重新发放首仓许可。不要直接再次运行 `rearm-entry.sh` 来绕过遗留工作流，等正常恢复、确认空仓后才能重新申请。
+
 ## 查看与运行
 
 ```bash
