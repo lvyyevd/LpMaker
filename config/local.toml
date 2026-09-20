@@ -25,9 +25,9 @@ emergency_slippage_bps = 30
 [liquidity]
 kind = "uniswap_v3"
 chain_id = 4663
-rpc_url = "https://robinhood-mainnet.g.alchemy.com/v2/rcbXa2gro1JFYhp6s3OkE"
+rpc_url = "https://soft-fabled-patina.robinhood-mainnet.quiknode.pro/e64d68bda6fb3806266ebb4d9426da61bb5ab90a/"
 # History only: PublicNode free eth_getLogs may require a personal token.
-archive_rpc_url = "https://robinhood-mainnet.g.alchemy.com/v2/rcbXa2gro1JFYhp6s3OkE"
+archive_rpc_url = "https://soft-fabled-patina.robinhood-mainnet.quiknode.pro/e64d68bda6fb3806266ebb4d9426da61bb5ab90a/"
 ws_url = "wss://soft-fabled-patina.robinhood-mainnet.quiknode.pro/e64d68bda6fb3806266ebb4d9426da61bb5ab90a/"
 # Optional public LP address for read-only monitoring; no private key needed.
 # owner = "0x..."
