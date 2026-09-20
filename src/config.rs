@@ -52,6 +52,9 @@ pub struct LiquidityConfig {
     pub rpc_url: String,
     /// Historical reads only; transaction submission always uses rpc_url.
     pub archive_rpc_url: Option<String>,
+    /// 同一进程内，同地址的所有 EVM 请求共享间隔；旧配置默认最多约 4 次/秒。
+    #[serde(default = "default_rpc_interval")]
+    pub rpc_min_interval_ms: u64,
     #[serde(default = "default_evm_ws")]
     pub ws_url: String,
     /// Public LP wallet address for monitoring without loading a private key.
@@ -85,6 +88,9 @@ pub struct LiquidityConfig {
 }
 fn default_gas_fee_buffer() -> u32 {
     10_000
+}
+fn default_rpc_interval() -> u64 {
+    250
 }
 fn default_gas_limit_buffer() -> u32 {
     2_000
@@ -171,6 +177,8 @@ pub struct MonitoringConfig {
     pub hyperliquid_refresh_seconds: u64,
     #[serde(alias = "liquidity_refresh_seconds")]
     pub robinhood_refresh_seconds: u64,
+    /// 已停用成交量统计；保留旧字段只为兼容已有配置，运行器不会启动补数。
+    pub volume_refresh_seconds: u64,
     pub volume_window_seconds: u64,
     pub backfill_blocks: u64,
     pub refresh_timeout_seconds: u64,
@@ -182,6 +190,7 @@ impl Default for MonitoringConfig {
             robinhood_interval_seconds: 60,
             hyperliquid_refresh_seconds: 30,
             robinhood_refresh_seconds: 15,
+            volume_refresh_seconds: 60,
             volume_window_seconds: 300,
             backfill_blocks: 6000,
             refresh_timeout_seconds: 45,
@@ -270,6 +279,10 @@ impl Config {
         validate_url(&self.hyperliquid.http_url, &["https", "http"])?;
         validate_url(&self.hyperliquid.ws_url, &["wss", "ws"])?;
         validate_url(&self.liquidity.rpc_url, &["https", "http", "wss", "ws"])?;
+        ensure!(
+            (1..=5_000).contains(&self.liquidity.rpc_min_interval_ms),
+            "rpc_min_interval_ms must be 1..=5000"
+        );
         validate_url(&self.liquidity.ws_url, &["wss", "ws"])?;
         if let Some(url) = &self.liquidity.archive_rpc_url {
             validate_url(url, &["http", "https", "ws", "wss"])?;
@@ -290,9 +303,6 @@ impl Config {
                 && self.monitoring.robinhood_interval_seconds > 0
                 && self.monitoring.hyperliquid_refresh_seconds > 0
                 && self.monitoring.robinhood_refresh_seconds > 0
-                && self.monitoring.volume_window_seconds > 0
-                && self.monitoring.backfill_blocks > 0
-                && self.monitoring.backfill_blocks <= 100_000
                 && self.monitoring.refresh_timeout_seconds > 0
                 && self.liquidity.nonce_refresh_seconds > 0
                 && self.liquidity.pending_warn_seconds > 0

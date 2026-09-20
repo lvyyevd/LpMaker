@@ -40,7 +40,7 @@ cargo run --locked -- --config config/paper-200.toml run
 
 `hyperliquid.account` 填实际账户地址即可订阅真实持仓；未填写时输出 `account_not_configured`，不会把未知持仓当成零。Paper 模式另外标记模拟空单。实盘 LP 的只读查看可填写 `liquidity.owner`（公开地址）；运行实盘后也会从持久化的执行钱包身份读取，不会为监控提取私钥。
 
-状态摘要的打印频率与数据刷新分开：Hyperliquid 账户仍每 30 秒刷新，LP 与成交量仍每 15 秒刷新；策略继续使用 `poll_seconds`，WebSocket 实时接收。`run` 的原始结构化报告保留在状态目录的 `monitor_hyperliquid.json` 和 `monitor_robinhood.json`，`debug` 级别也会输出。缺失数据标为待获取，待领取手续费与组合净值变动分别显示；净值变动未扣 Gas、未校正出入金，不能直接当作净利润。 每个 LP 还显示持仓时长和滚动 1 小时手续费 APR；不足 1 小时会标明实际观察时长，历史记录保存到 `lp_performance.json` 供重启恢复。该 APR 仅为手续费单利年化，非组合净收益；详见 [APR 口径](docs/lifecycle.md#持仓时长与近-1-小时手续费-apr)。
+状态摘要的打印频率与数据刷新分开：Hyperliquid 账户每 30 秒刷新，LP 每 15 秒检查并复用新鲜的确认快照；已关闭近 5 分钟成交量统计和历史补数。现有 WSS 提供区块、实时池价和 NFT 变更，策略与监控共享读取，详见 [RPC 请求优化](docs/rpc-observations.md)。EVM RPC 共享节流和限流退避，详见 [RPC 限流恢复](docs/rpc-rate-limits.md)；策略继续使用 `poll_seconds`，WebSocket 实时接收。`run` 的原始结构化报告保留在状态目录的 `monitor_hyperliquid.json` 和 `monitor_robinhood.json`，`debug` 级别也会输出。缺失数据标为待获取，待领取手续费与组合净值变动分别显示；净值变动未扣 Gas、未校正出入金，不能直接当作净利润。 每个 LP 还显示持仓时长和滚动 1 小时手续费 APR；不足 1 小时会标明实际观察时长，历史记录保存到 `lp_performance.json` 供重启恢复。该 APR 仅为手续费单利年化，非组合净收益；详见 [APR 口径](docs/lifecycle.md#持仓时长与近-1-小时手续费-apr)。
 
 连接、nonce、日志配置和验证结果见 [监听与生命周期](docs/lifecycle.md)。持仓、限价单、策略阶段的保存文件及启动对账顺序见 [状态持久化与启动对账](docs/recovery.md)。
 

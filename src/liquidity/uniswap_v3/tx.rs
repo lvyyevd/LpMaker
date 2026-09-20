@@ -43,7 +43,7 @@ pub struct Executor {
 #[async_trait::async_trait]
 impl crate::domain::LiquidityExecutor for Executor {
     async fn snapshot(&self) -> Result<crate::domain::PoolSnapshot> {
-        self.venue.snapshot().await
+        self.venue.fresh_snapshot().await
     }
     async fn current_positions(&self) -> Result<Vec<LpPosition>> {
         self.venue
@@ -443,6 +443,7 @@ impl Executor {
         Ok(tx.into_signed(sig).encoded_2718())
     }
     async fn broadcast(&self, hash: &str, raw: &[u8], nonce: u64) -> Result<()> {
+        self.venue.observations.invalidate();
         let result = self
             .venue
             .rpc
@@ -519,10 +520,12 @@ impl Executor {
                             "receipt reorged; reconcile required"
                         );
                         if hex_u64(&r["status"])? != 1 {
+                            self.venue.observations.invalidate();
                             self.nonce.confirmed(hash, &r).await?;
                             bail!("on-chain transaction reverted: {hash}")
                         }
                         self.record_receipt(&r, operation)?;
+                        self.venue.observations.invalidate();
                         self.nonce.confirmed(hash, &r).await?;
                         tracing::info!(hash=%hash, block, operation=%operation, "EVM operation confirmed");
                         return Ok(r);
@@ -726,7 +729,8 @@ impl Executor {
         self.swap_amount(true, None).await
     }
     async fn swap_amount(&self, sell_base: bool, amount: Option<f64>) -> Result<Value> {
-        let s = self.venue.snapshot().await?;
+        // 兑换限价仍需独立核对确认块，不能复用监控的短期快照。
+        let s = self.venue.fresh_snapshot().await?;
         let (token_in, token_out, di, do_, rate) = if sell_base {
             (
                 self.venue.base,

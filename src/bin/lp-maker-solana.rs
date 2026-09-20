@@ -46,6 +46,24 @@ enum Command {
         output: PathBuf,
         #[arg(long, default_value_t = 0.4)]
         apr: f64,
+        /// 将该数量原生 SOL 储备计入总账户净值及成本。
+        #[arg(long)]
+        native_reserve_sol: Option<f64>,
+    },
+    /// 可恢复的离线训练；固定 40% LP APR，默认计算 10 小时。
+    Train {
+        #[arg(long)]
+        data: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = 10.)]
+        hours: f64,
+        #[arg(long, default_value_t = 0.25)]
+        target_return: f64,
+        #[arg(long, default_value_t = 250919)]
+        seed: u64,
+        #[arg(long)]
+        max_candidates: Option<u64>,
     },
     Status,
     Reconcile,
@@ -71,8 +89,35 @@ async fn main() -> Result<()> {
         } => {
             lp_maker::solana::research::run(&c, &data, &output, apr, grid.as_deref())?;
         }
-        Command::VerifyResearch { data, output, apr } => {
-            lp_maker::solana::research::verify(&c, &data, &output, apr)?;
+        Command::VerifyResearch {
+            data,
+            output,
+            apr,
+            native_reserve_sol,
+        } => {
+            if let Some(native_sol) = native_reserve_sol {
+                lp_maker::solana::research::verify_account(&c, &data, &output, apr, native_sol)?;
+            } else {
+                lp_maker::solana::research::verify(&c, &data, &output, apr)?;
+            }
+        }
+        Command::Train {
+            data,
+            output,
+            hours,
+            target_return,
+            seed,
+            max_candidates,
+        } => {
+            lp_maker::solana::research::training::train(
+                &c,
+                &data,
+                &output,
+                hours,
+                target_return,
+                seed,
+                max_candidates,
+            )?;
         }
         Command::Status => {
             let store = lp_maker::store::Store::readonly(&c.state_dir);

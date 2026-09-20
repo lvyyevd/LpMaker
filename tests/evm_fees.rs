@@ -24,6 +24,7 @@ struct Chain {
     required_base: u128,
     priority_error: Option<i64>,
     drop_response: bool,
+    rate_limit_broadcast: bool,
     pending_external: bool,
     consumed_external: bool,
     original_wins: Option<String>,
@@ -39,6 +40,7 @@ impl Default for Chain {
             required_base: 58_324_000,
             priority_error: None,
             drop_response: false,
+            rate_limit_broadcast: false,
             pending_external: false,
             consumed_external: false,
             original_wins: None,
@@ -139,7 +141,9 @@ async fn server_for(chain_id: u64) -> (String, Arc<Mutex<Chain>>, tokio::task::J
                             let tx = TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap();
                             let hash = format!("{:#x}", keccak256(raw));
                             s.sent.push((hash.clone(), tx.clone()));
-                            if let Some(original) = s.original_wins.clone() {
+                            if s.rate_limit_broadcast {
+                                error = Some(json!({"code":429,"message":"too many requests"}));
+                            } else if let Some(original) = s.original_wins.clone() {
                                 s.mined = Some(original);
                                 error = Some(json!({"code":-32000,"message":"nonce too low"}));
                             } else if tx.max_fee_per_gas() < s.required_base {
@@ -568,4 +572,31 @@ fn fee_overflow_is_rejected() {
     };
     assert!(fees.replacement(u128::MAX, 0).is_err());
     assert!(fees.replacement(2, u128::MAX).is_err());
+}
+
+#[tokio::test]
+async fn broadcast_429_retains_signed_pending_and_reserved_nonce_without_retry() {
+    let (url, state, server) = server().await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let ex = executor(url, store.clone());
+    state.lock().unwrap().rate_limit_broadcast = true;
+    let (data, op) = approval(&ex);
+    let error = ex.send(ex.venue.quote, data, op).await.unwrap_err();
+    assert!(!lp_maker::runtime::retryable(&error));
+    assert!(format!("{error:#}").contains("pending retained"));
+    let pending = store.pending().unwrap().unwrap();
+    assert!(
+        pending["raw_transaction"]
+            .as_str()
+            .unwrap()
+            .starts_with("0x")
+    );
+    assert_eq!(pending["nonce"], 207);
+    assert!(pending["last_broadcast_error"].is_object());
+    let (data, op) = approval(&ex);
+    assert!(ex.send(ex.venue.quote, data, op).await.is_err());
+    assert_eq!(store.pending().unwrap().unwrap(), pending);
+    assert_eq!(state.lock().unwrap().sent.len(), 1);
+    server.abort();
 }

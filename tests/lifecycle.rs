@@ -537,6 +537,7 @@ fn endpoint_changes_preserve_state_but_budget_changes_require_migration() {
     new["liquidity"]["rpc_url"] = json!("ws://localhost:9999");
     new["liquidity"]["archive_rpc_url"] = Value::Null;
     new["liquidity"]["nonce_refresh_seconds"] = json!(60);
+    new["liquidity"]["rpc_min_interval_ms"] = json!(500);
     assert_eq!(
         fingerprint(&old.to_string()).unwrap(),
         fingerprint(&new.to_string()).unwrap()

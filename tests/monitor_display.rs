@@ -2,6 +2,25 @@ use lp_maker::monitor::display::{hyperliquid, robinhood};
 use serde_json::json;
 
 #[test]
+fn connected_ws_and_old_empty_snapshot_do_not_claim_current_flat_inventory() {
+    let report = json!({
+        "mode":"live", "max_data_age_seconds":60, "snapshot_age_ms":858000,
+        "ws":{"connected":true}, "ws_data_age_ms":100,
+        "rpc_cooldown_seconds":120, "history_rpc_cooldown_seconds":0,
+        "runtime":{"status":"degraded"},
+        "snapshot":{"positions":[], "strategy":{"phase":"Active"}},
+        "last_refresh_error":"429"
+    });
+    let rendered = robinhood(&report);
+    assert!(rendered.contains("当前链上仓位待核对"));
+    assert!(rendered.contains("上次观察时未发现仓位"));
+    assert!(rendered.contains("上次策略状态：正常运行"));
+    assert!(rendered.contains("主 RPC：节点限流，约 120 秒后允许重试"));
+    assert!(rendered.contains("当前未恢复正常决策"));
+    assert!(!rendered.contains("LP 仓位：未发现仓位"));
+}
+
+#[test]
 fn unknown_account_is_distinct_from_confirmed_zero_and_uses_unified_collateral() {
     let unknown = hyperliquid(&json!({"account_configured":true}));
     assert!(unknown.contains("真实合约持仓：待获取"));
@@ -81,7 +100,7 @@ fn lp_fees_and_equity_change_keep_distinct_accounting_and_missing_values() {
     assert!(rendered.contains("LP 合计：本金市值 119.0567 USDG｜待领取手续费 0.002626 USDG"));
     assert!(rendered.contains("相对基准变动：-0.0498 USD"));
     assert!(rendered.contains("不等于净利润"));
-    assert!(rendered.contains("1,343,490.93 USDG"));
+    assert!(!rendered.contains("池子成交量"));
     assert!(rendered.contains("已建仓，历史已保存"));
 
     report["snapshot"]["positions"][0]["unclaimed_fees_usdg"] = json!(null);
@@ -93,7 +112,7 @@ fn lp_fees_and_equity_change_keep_distinct_accounting_and_missing_values() {
     assert!(rendered.contains("LP 合计：本金市值 119.0567 USDG｜待领取手续费 待获取"));
     assert!(rendered.contains("不可比较（账户资金口径已变化）"));
     assert!(!rendered.contains("-0.0498 USD"));
-    assert!(rendered.contains("数据不完整，仍在补齐"));
+    assert!(!rendered.contains("成交量"));
     assert!(rendered.contains("已过期"));
     assert!(rendered.contains("RPC timeout"));
 

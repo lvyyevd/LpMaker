@@ -31,8 +31,6 @@ hyperliquid_interval_seconds = 60
 robinhood_interval_seconds = 60
 hyperliquid_refresh_seconds = 30
 robinhood_refresh_seconds = 15
-volume_window_seconds = 300
-backfill_blocks = 6000
 refresh_timeout_seconds = 45
 
 [logging]
@@ -57,22 +55,24 @@ cargo run --locked -- --config config/paper-200.toml run
 
 两端连接共享同一生命周期实现，支持 `ws://`、`wss://`。Hyperliquid 使用原生订阅协议和应用层 `{"method":"ping"}`；EVM 使用 `eth_subscribe(newHeads/logs)` 和 WebSocket Ping/Pong。EVM 普通 RPC 也可配置为 HTTP、HTTPS、WS、WSS。
 
-连接/写入分别有超时；EOF、Close、无响应、订阅拒绝、异常 JSON 都会触发重连。等待时间从 1 秒指数退避到 30 秒，稳定连接后恢复初始退避。重连后自动重订阅，重新核对账户快照，历史池日志独立补齐。连续 60 秒没有收到帧触发心跳故障；连续 300 秒没有业务数据也会重连，Pong 和订阅 ACK 不会延长业务数据计时。
+连接/写入分别有超时；EOF、Close、无响应、订阅拒绝、异常 JSON 都会触发重连。等待时间从 1 秒指数退避到 30 秒，稳定连接后恢复初始退避。重连后自动重订阅，使进程内共享观察失效，并重新核对账户和区块；不再补拉历史池日志。连续 60 秒没有收到帧触发心跳故障；连续 300 秒没有业务数据也会重连，Pong 和订阅 ACK 不会延长业务数据计时。
 
 有界消息队列过载会触发恢复，不会无限占用内存。停止通知会打断握手和重试等待，监控退出时取消并回收 WebSocket 与刷新任务。策略结束也会停止监控和 nonce 后台任务。运行中 Ctrl-C 保留真实仓位；已经准备/发送但尚未确认的交易仍保留 pending，不假定取消或成功。
 
-## PublicNode 历史查询限制
+## 复用 WSS 与减少 RPC
 
-本地实测 PublicNode 免费 HTTP 对部分历史 `eth_getLogs` 返回 HTTP 403：`Archive requests require a personal token`。主 RPC、发交易以及 WS 订阅仍使用 PublicNode；仅历史日志和历史区块头走 `archive_rpc_url`。默认该字段使用官方公开 Robinhood RPC，也可在本机换成具备历史权限的 PublicNode URL。两节点会核对 chain ID 与相同高度的 canonical block hash。不会把交易发到历史节点。
+已停用近 5 分钟成交量统计、历史区块定位和日志补数；旧成交量配置字段仅为兼容而保留，不能重新启用这些任务。`archive_rpc_url` 仍可供独立历史查询工具使用，实时监控不会为成交量访问它。
 
-5 分钟成交量通过区块时间二分定位起点，每次只汇总确认区块中的 Swap，按 USDG 一侧绝对金额计一次，另外报告 WETH 数量。部分节点的日志 `blockTimestamp` 为 `0x0`，所以不依赖这个可选字段。历史请求按 200 个区块分批、最多 4 路并行；按 `(blockHash, logIndex)` 去重，发现游标区块重组则重新构建窗口。
+现有 EVM WebSocket 同时订阅区块头、池子日志和 Position Manager 的 NFT 事件，不另建监听连接。新鲜且连续的区块头经过 RPC 锚定后可替代重复查块；Swap 推送用于显示实时池价，明确标注未确认。余额、LP 本金和手续费继续以确认块上的真实读取为准，不能由 Swap 推算个人收益。
 
-历史补数与 LP 快照刷新独立运行。输出包含 `complete`、`as_of_ms`、`volume_age_ms`、错误和刷新状态：首次补数或慢节点期间不把不完整数据当成完整的 5 分钟成交量。打印周期不代表所有上游数据都恰好同时更新。状态摘要每 60 秒打印，账户仍每 30 秒、LP 和成交量仍每 15 秒独立刷新，策略轮询及 WS 实时接收频率不受影响。
+策略与监控复用同一链、池和数据源的短期观察；普通 Hold 决策直接使用本轮已核对库存。NFT 清单至少每分钟重新枚举，断线、缺块、重组、我方 NFT 变更及本地交易均使相关缓存失效。原观察时间不会因复用而刷新；交易前报价、余额和 nonce 继续强制核对。
+
+状态摘要每 60 秒打印，HL 账户每 30 秒刷新，LP 每 15 秒检查，并显示该端点本报告周期实际发出的 RPC 请求数。遇到限流继续统一退避。细节与本机请求计数测试见 [RPC 请求优化](rpc-observations.md) 和 [RPC 限流恢复](rpc-rate-limits.md)。
 
 ## 状态与收益口径
 
 - Hyperliquid 每 60 秒中文摘要：订阅币种的价格、数据时间、连接状态、实际账户余额/持仓、模拟空单（如适用）。缺少账户地址与真实零持仓分开表示。
-- Robinhood 每 60 秒中文摘要：确认区块价格、每层上下界、区间内外、区间内相对位置、区间本金市值、近期确认交易量、策略状态及收益口径。
+- Robinhood 每 60 秒中文摘要：确认区块价格、每层上下界、区间内外、区间内相对位置、区间本金市值、策略状态、收益口径、WSS 实时参考价和 RPC 请求数量。
 - Paper：模拟净值和损益、模拟换币成本/对冲费/资金费；LP 手续费和 gas 没有模拟，因此显示未知而不是编造收益。
 - Live：待领取费用按实际链上 fee growth 计算；组合显示相对首次观察基准的账面变化。该变化含待领费用，但不扣链上 gas、也未扣除外部入出金影响，不能直接当作完整净利润。
 - 只读监控没有策略历史基准时，收益显示不可用。历史缓存、账户快照都带时间，失败时保留之前的时间，不把旧数据伪装成新数据。

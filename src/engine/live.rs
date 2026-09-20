@@ -351,4 +351,29 @@ impl Live {
         self.store.write("workflow.json", &Option::<Value>::None)?;
         Ok(())
     }
+
+    /// 普通持有循环复用本轮刚核对的库存，避免仅为判断保护性对冲再完整读链。
+    /// 实际下单仍由对冲控制器重新检查交易所持仓、挂单和资金。
+    pub async fn hold_observed(
+        &self,
+        d: &Decision,
+        portfolio: &Portfolio,
+        observed_ms: u64,
+    ) -> Result<()> {
+        ensure!(
+            d.lp == LpIntent::Hold,
+            "observed hold cannot execute LP mutations"
+        );
+        crate::runtime::fresh(
+            observed_ms,
+            crate::now_ms(),
+            self.cfg.strategy.max_data_age_seconds,
+        )?;
+        self.hedge(
+            d.target_short_base,
+            d.emergency
+                || d.target_short_base > 0.0 && d.target_short_base >= portfolio.base() * 0.99,
+        )
+        .await
+    }
 }

@@ -488,6 +488,77 @@ async fn tiny_initial_hedge_creates_no_order_intent() {
     assert!(store.pending().unwrap().is_none());
     assert!(store.read::<Value>("hedge_order.json").unwrap().is_none());
 }
+
+struct NoExtraReads;
+#[async_trait]
+impl LiquidityExecutor for NoExtraReads {
+    async fn snapshot(&self) -> Result<PoolSnapshot> {
+        anyhow::bail!("unexpected extra pool read")
+    }
+    async fn current_positions(&self) -> Result<Vec<LpPosition>> {
+        anyhow::bail!("unexpected extra LP read")
+    }
+    async fn wallet_balances(&self) -> Result<(f64, f64)> {
+        anyhow::bail!("unexpected extra wallet read")
+    }
+    async fn mint_layer(&self, _: &str, _: f64, _: f64) -> Result<()> {
+        unreachable!()
+    }
+    async fn increase_position(&self, _: &LpPosition, _: f64) -> Result<()> {
+        unreachable!()
+    }
+    async fn remove_position(&self, _: &LpPosition) -> Result<()> {
+        unreachable!()
+    }
+    async fn swap_inventory(&self, _: bool, _: f64) -> Result<()> {
+        unreachable!()
+    }
+}
+#[tokio::test]
+async fn hold_reuses_observed_inventory_but_rejects_stale_data_and_lp_mutations() {
+    let mock = Mock::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let mut runner = live(config(), store.clone(), &mock.url);
+    runner.liquidity = Arc::new(NoExtraReads);
+    let portfolio = crate::domain::Portfolio {
+        positions: vec![],
+        wallet_base: 0.01,
+        wallet_quote: 100.0,
+        short_base: 0.0,
+        hedge_equity: 60.0,
+        reserve: 20.0,
+    };
+    let mut d = Decision {
+        state: "Active".into(),
+        reasons: vec![],
+        lp: LpIntent::Hold,
+        target_short_base: 0.00005,
+        emergency: false,
+    };
+    runner
+        .hold_observed(&d, &portfolio, crate::now_ms())
+        .await
+        .unwrap();
+    assert!(mock.state.lock().unwrap().actions.is_empty());
+    assert!(
+        store
+            .read::<Value>("hedge_residual.json")
+            .unwrap()
+            .is_some()
+    );
+    assert!(crate::runtime::retryable(
+        &runner.hold_observed(&d, &portfolio, 0).await.unwrap_err()
+    ));
+    d.lp = LpIntent::Deploy { fraction: 1.0 };
+    assert!(
+        runner
+            .hold_observed(&d, &portfolio, crate::now_ms())
+            .await
+            .is_err()
+    );
+    assert!(store.pending().unwrap().is_none());
+}
 #[tokio::test]
 async fn wrong_or_expired_agent_is_rejected_before_any_exchange_or_intent() {
     let mock = Mock::start().await;

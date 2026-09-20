@@ -143,19 +143,18 @@ pub fn liquidity(report: &Value) -> String {
     // 缺少标签的旧日志仍按 Robinhood 解释；新版运行器始终提供标签。
     let market = &report["market"];
     let chain = market["chain"].as_str().unwrap_or("Robinhood");
-    let base = market["base_symbol"].as_str().unwrap_or("WETH");
     let quote = market["quote_symbol"].as_str().unwrap_or("USDG");
     let price_symbol = market["price_symbol"].as_str().unwrap_or("ETH");
     let snapshot = &report["snapshot"];
     let pool = &snapshot["pool"];
     let strategy = &snapshot["strategy"];
     let paper = report["mode"] == "paper";
-    let apr_stale = report["snapshot_age_ms"]
+    let snapshot_stale = report["snapshot_age_ms"]
         .as_u64()
         .zip(report["max_data_age_seconds"].as_u64())
         .is_some_and(|(age, limit)| age > limit.saturating_mul(1000))
-        || report["last_refresh_error"].is_string()
-        || snapshot["performance_error"].is_string();
+        || report["last_refresh_error"].is_string();
+    let apr_stale = snapshot_stale || snapshot["performance_error"].is_string();
     let mut lines = vec![
         format!(
             "【{chain} LP 状态｜{}】",
@@ -167,8 +166,13 @@ pub fn liquidity(report: &Value) -> String {
             age(report["snapshot_age_ms"].as_u64(), report)
         ),
         format!(
-            "{price_symbol} 价格：{} {quote}｜策略：{}｜建仓历史：{}",
+            "{price_symbol} 价格：{} {quote}｜{}：{}｜建仓历史：{}",
             n(&pool["price"], 2),
+            if snapshot_stale {
+                "上次策略状态"
+            } else {
+                "策略"
+            },
             phase(&strategy["phase"]),
             match strategy["entry_history"].as_str() {
                 Some("established") => "已建仓，历史已保存",
@@ -178,6 +182,39 @@ pub fn liquidity(report: &Value) -> String {
             }
         ),
     ];
+    let swap = &report["last_unconfirmed_swap"];
+    if number(&swap["price"]).is_some() {
+        lines.push(format!("WSS 实时 {price_symbol}：{} {quote}｜推送：{}｜未确认行情，LP 本金和 APR 仍按下方确认快照计算。",
+            n(&swap["price"], 2), observed_age(&swap["received_ms"], report)));
+    }
+    if report["rpc_requests"].is_object() {
+        lines.push(format!(
+            "本进程主 RPC：近 {} 秒发起 {} 次请求｜累计 {} 次（策略与监控合计，不含 WSS 推送）",
+            n(&report["rpc_requests"]["interval_seconds"], 1),
+            n(&report["rpc_requests"]["started"], 0),
+            n(&report["rpc_requests"]["total"], 0)
+        ));
+    }
+    if snapshot_stale {
+        lines.push("数据状态：LP 快照过期或刷新失败；以下为历史观察值，当前链上仓位待核对。WSS 已连接不代表 RPC 读取正常。".into());
+    }
+    for (key, label) in [
+        ("rpc_cooldown_seconds", "主 RPC"),
+        ("history_rpc_cooldown_seconds", "历史 RPC"),
+    ] {
+        if let Some(seconds) = report[key].as_u64().filter(|seconds| *seconds > 0) {
+            lines.push(format!(
+                "{label}：节点限流，约 {seconds} 秒后允许重试；等待期间不向该节点发请求。"
+            ));
+        }
+    }
+    if report["runtime"]["status"] == "degraded" {
+        lines.push(
+            "策略执行：读取失败，等待重新对账；当前未恢复正常决策，仓位与未决记录保留。".into(),
+        );
+    } else if report["runtime"]["status"] == "recovering" {
+        lines.push("策略执行：正在重新对账，尚未恢复正常决策。".into());
+    }
     match snapshot["positions"]
         .as_array()
         .filter(|_| snapshot["positions_observed"] != false)
@@ -185,7 +222,14 @@ pub fn liquidity(report: &Value) -> String {
         None => lines.push("LP 仓位：待获取，不能视为零仓位".into()),
         Some(positions) => {
             if positions.is_empty() {
-                lines.push("LP 仓位：未发现仓位".into());
+                lines.push(
+                    if snapshot_stale {
+                        "LP 仓位：上次观察时未发现仓位（当前是否空仓待核对）"
+                    } else {
+                        "LP 仓位：未发现仓位"
+                    }
+                    .into(),
+                );
             }
             for pos in positions {
                 let layer = text(&pos["layer"]);
@@ -280,24 +324,6 @@ pub fn liquidity(report: &Value) -> String {
             }
         }
     }
-    let volume = &report["recent_volume"];
-    if volume.is_null() {
-        lines.push("近期池子成交量：待获取已确认数据".into());
-    } else {
-        lines.push(format!(
-            "近 {} 秒池子成交量：{} {quote} / {} {base}｜{} 笔｜{}｜统计更新：{}",
-            n(&volume["window_seconds"], 0),
-            n(value(volume, "volume_quote", "volume_usdg"), 2),
-            n(value(volume, "volume_base", "volume_weth"), 4),
-            n(&volume["swap_count"], 0),
-            match volume["complete"].as_bool() {
-                Some(true) => "已完整核对",
-                Some(false) => "数据不完整，仍在补齐",
-                None => "待获取",
-            },
-            age(report["volume_age_ms"].as_u64(), report)
-        ));
-    }
     let returns = &snapshot["returns"];
     let change = if returns["baseline_comparable"] == false {
         "不可比较（账户资金口径已变化）".into()
@@ -317,19 +343,16 @@ pub fn liquidity(report: &Value) -> String {
         n(&returns["equity_usd"], 4),
         observed_age(&returns["observed_ms"], report)
     ));
-    lines.push(if paper { "收益口径：模拟结果，未模拟 LP 手续费与 Gas。".into() }
-        else { "收益口径：组合净值变动包含待领手续费，未扣 Gas、未校正出入金，不等于净利润；池子成交量不是个人收益。".into() });
+    lines.push(if paper {
+        "收益口径：模拟结果，未模拟 LP 手续费与 Gas。".into()
+    } else {
+        "收益口径：组合净值变动包含待领手续费，未扣 Gas、未校正出入金，不等于净利润。".into()
+    });
     if !paper {
         lines.push("APR口径：按窗口内实际手续费代币增量和时间加权LP本金估算单利年化；不含币价损益、Gas、对冲费用和资金费，不代表未来收益。".into());
     }
     if let Some(error) = snapshot["performance_error"].as_str() {
         lines.push(format!("手续费 APR 计算暂停：{error}"));
-    }
-    if report["volume_refresh_pending"] == true {
-        lines.push("成交量正在后台补齐。".into());
-    }
-    if let Some(error) = report["volume_error"].as_str() {
-        lines.push(format!("成交量刷新失败：{error}"));
     }
     refresh_notes(&mut lines, report);
     lines.join("\n")

@@ -10,10 +10,10 @@ use crate::{
     strategy::Strategy,
 };
 use anyhow::{Result, ensure};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 const YEAR_HOURS: f64 = 365. * 24.;
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Point {
     pub time_ms: u64,
     pub price: f64,
@@ -22,7 +22,7 @@ pub struct Point {
     pub fees: f64,
     pub phase: String,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Outcome {
     pub start_ms: u64,
     pub end_ms: u64,
@@ -40,6 +40,42 @@ pub struct Outcome {
     pub phase: String,
     pub exits: BTreeMap<String, u64>,
     pub equity_curve: Vec<Point>,
+    /// 单独列出原生 SOL 储备的币价损益，不能把它算成 LP 手续费。
+    pub native_reserve_pnl: f64,
+    pub native_reserve_cost: f64,
+    pub model_rejections: Vec<String>,
+}
+/// 只用于离线研究，不读取钱包，也不改变实盘策略或检查点。
+#[derive(Clone, Copy, Debug)]
+pub struct AccountModel {
+    pub native_sol: f64,
+}
+
+#[derive(Default)]
+struct MarginGuard {
+    short: f64,
+    account_equity: f64,
+    isolated_equity: f64,
+}
+impl MarginGuard {
+    fn observe(&mut self, p: &Paper, price: f64) {
+        if self.short > 0. {
+            self.isolated_equity += p.hedge_equity - self.account_equity;
+        }
+        if p.short > self.short {
+            self.isolated_equity += (p.short - self.short) * price / f64::from(p.leverage);
+        } else if self.short > 0. {
+            self.isolated_equity *= p.short / self.short;
+        }
+        self.short = p.short;
+        self.account_equity = p.hedge_equity;
+    }
+    fn unsafe_at(&self, price: f64, adverse_price: f64) -> bool {
+        // 10% 是保守的研究准入缓冲，不冒充交易所历史强平价。
+        self.short > 0.
+            && self.isolated_equity - self.short * (adverse_price - price)
+                <= self.short * adverse_price * 0.10
+    }
 }
 /// No fee is earned during cash periods or a bar which breaches the range.
 /// The smaller endpoint principal is used: no full-budget APR on a partial/reduced position.
@@ -99,8 +135,88 @@ pub fn simulate(
     cost_multiplier: f64,
     curve: bool,
 ) -> Result<Outcome> {
+    simulate_inner(
+        c,
+        data,
+        signals,
+        start,
+        end,
+        apr,
+        cost_multiplier,
+        curve,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn simulate_account(
+    c: &Config,
+    data: &Data,
+    signals: &[Option<regime::Signals>],
+    start: u64,
+    end: u64,
+    apr: f64,
+    cost_multiplier: f64,
+    curve: bool,
+    account: AccountModel,
+) -> Result<Outcome> {
+    simulate_inner(
+        c,
+        data,
+        signals,
+        start,
+        end,
+        apr,
+        cost_multiplier,
+        curve,
+        Some(account),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn simulate_inner(
+    original: &Config,
+    data: &Data,
+    signals: &[Option<regime::Signals>],
+    start: u64,
+    end: u64,
+    apr: f64,
+    cost_multiplier: f64,
+    curve: bool,
+    account: Option<AccountModel>,
+) -> Result<Outcome> {
+    ensure!(
+        signals.len() == data.pool.len(),
+        "signal/price length mismatch"
+    );
+    ensure!(
+        apr.is_finite() && apr >= 0. && cost_multiplier.is_finite() && cost_multiplier >= 1.,
+        "invalid research costs/APR"
+    );
+    let mut working = original.clone();
+    let c = &mut working;
     let mut paper = Paper::new(&c.strategy);
     paper.leverage = c.hyperliquid.leverage;
+    let first = data
+        .pool
+        .iter()
+        .find(|b| b.timestamp * 1000 >= start && b.timestamp * 1000 < end)
+        .ok_or_else(|| anyhow::anyhow!("empty research interval"))?;
+    let native_sol = account.map_or(0., |a| a.native_sol);
+    ensure!(
+        native_sol.is_finite() && native_sol >= 0.,
+        "invalid native reserve"
+    );
+    let native_value = native_sol * first.open;
+    ensure!(
+        native_value <= c.strategy.reserve,
+        "native rent reserve exceeds allocated capital"
+    );
+    let mut native_cost = native_value * 0.0034 * cost_multiplier;
+    paper.cash -= native_cost;
+    let mut margin = MarginGuard::default();
+    margin.observe(&paper, first.open);
+    let mut rejections = std::collections::BTreeSet::new();
     let mut state = Strategy::default();
     let mut peak = c.strategy.total_capital;
     let mut dd: f64 = 0.;
@@ -123,10 +239,22 @@ pub fn simulate(
             .map_err(|_| anyhow::anyhow!("missing paired HL hour"))?;
         let h = &data.hedge[hi];
         paper.mark(b.open, h.open);
+        c.strategy.reserve = original.strategy.reserve - native_value + native_sol * b.open;
         // Settlement occurs a few ms after the hour. Attribute it to pre-decision inventory;
         // funding is never used as a predictive feature and cannot credit a new position retroactively.
         let funding_time = t / HOUR * HOUR;
         paper.funding(data.funding[&funding_time], h.open, funding_time);
+        if account.is_some() {
+            margin.observe(&paper, h.open);
+            if margin.unsafe_at(h.open, h.open) {
+                rejections.insert("isolated_margin_buffer".to_string());
+            }
+            // 亏损后的保证金不可继续按最初充值额度使用。
+            c.strategy.hedge_collateral = original
+                .strategy
+                .hedge_collateral
+                .min(paper.hedge_equity.max(0.));
+        }
         if i > 0 && t > data.pool[i - 1].timestamp * 1000 + data.step_ms {
             state.phase = crate::strategy::Phase::Paused;
             state.pause_since = t;
@@ -193,11 +321,24 @@ pub fn simulate(
         paper.cash -= extra;
         paper.swap_costs += extra;
         state.observe_lp(!paper.positions.is_empty());
+        if account.is_some() {
+            margin.observe(&paper, h.open);
+            if margin.unsafe_at(h.open, h.high) {
+                rejections.insert("isolated_margin_intrabar_buffer".to_string());
+            }
+            if paper.short * h.open / f64::from(paper.leverage) > paper.hedge_equity.max(0.) {
+                rejections.insert("insufficient_hedge_equity".to_string());
+            }
+            if paper.cash < 0. {
+                rejections.insert("negative_quote_cash".to_string());
+            }
+        }
         if data.intrabar_stress && !paper.positions.is_empty() {
             // Feasible low-first intrabar path, not a claim about the unknowable tick sequence.
             // Use contemporaneous basis rather than pairing unrelated spot/perp extrema.
             let low_hedge = b.low * h.open / b.open;
             paper.mark(b.low, low_hedge);
+            c.strategy.reserve = original.strategy.reserve - native_value + native_sol * b.low;
             let f = frame(c, &paper, t + data.step_ms / 3, b.low, low_hedge);
             let low_equity = f.portfolio.equity(b.low);
             peak = peak.max(low_equity);
@@ -242,6 +383,10 @@ pub fn simulate(
         paper.cash += fee;
         fees += fee;
         paper.mark(b.close, h.close);
+        c.strategy.reserve = original.strategy.reserve - native_value + native_sol * b.close;
+        if account.is_some() {
+            margin.observe(&paper, h.close);
+        }
         let p = paper.portfolio(&c.strategy);
         let equity = p.equity(b.close);
         peak = peak.max(equity);
@@ -281,6 +426,9 @@ pub fn simulate(
     let extra = (paper.swap_costs - old_swaps) * (cost_multiplier - 1.);
     paper.cash -= extra;
     paper.swap_costs += extra;
+    let native_sell_cost = native_sol * last.0 * 0.0034 * cost_multiplier;
+    paper.cash -= native_sell_cost;
+    native_cost += native_sell_cost;
     let pnl = paper.portfolio(&c.strategy).equity(last.0) - c.strategy.total_capital;
     dd = dd.max((peak - c.strategy.total_capital - pnl) / peak);
     if curve {
@@ -298,7 +446,7 @@ pub fn simulate(
         end_ms: end,
         pnl,
         lp_fees: fees,
-        price_and_hedge_pnl: pnl - fees,
+        price_and_hedge_pnl: pnl - fees - (native_sol * last.0 - native_value) + native_cost,
         hedge_cost: paper.hedge_fees,
         swap_cost: paper.swap_costs,
         operation_cost: paper.operation_costs,
@@ -310,5 +458,8 @@ pub fn simulate(
         phase: format!("{:?}", state.phase),
         exits,
         equity_curve: points,
+        native_reserve_pnl: native_sol * last.0 - native_value,
+        native_reserve_cost: native_cost,
+        model_rejections: rejections.into_iter().collect(),
     })
 }

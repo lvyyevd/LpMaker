@@ -1,6 +1,7 @@
 pub mod denomination;
 pub mod display;
 pub mod performance;
+// 保留旧离线统计工具的兼容入口；实时监控不再创建成交量统计或补数任务。
 pub mod volume;
 use crate::{
     config::{Config, Mode},
@@ -78,7 +79,6 @@ fn interval(seconds: u64) -> tokio::time::Interval {
 enum Refresh {
     Hyperliquid(Result<Value>),
     Liquidity(Result<Value>),
-    Volume(Result<(Value, volume::Volume)>),
 }
 
 /// Observe only: no signer is constructed, and no exchange/chain mutation is sent.
@@ -86,6 +86,8 @@ enum Refresh {
 pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<bool>) -> Result<()> {
     let hl = Client::new(c.hyperliquid.clone(), store.clone())?;
     let venue = crate::liquidity::connect(c.liquidity.clone())?;
+    let _feed_guard =
+        crate::liquidity::uniswap_v3::observations::FeedGuard(venue.observations.clone());
     let (hl_tx, mut hl_rx) = mpsc::channel(4096);
     let (evm_tx, mut evm_rx) = mpsc::channel(4096);
     let mut streams = JoinSet::new();
@@ -115,6 +117,12 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
             vec![
                 json!(["newHeads"]),
                 json!(["logs",{"address":ecfg.liquidity.pool}]),
+                json!(["logs",{"address":ecfg.liquidity.position_manager,"topics":[[
+                    format!("{:#x}",alloy::primitives::keccak256("Transfer(address,address,uint256)")),
+                    format!("{:#x}",alloy::primitives::keccak256("IncreaseLiquidity(uint256,uint128,uint256,uint256)")),
+                    format!("{:#x}",alloy::primitives::keccak256("DecreaseLiquidity(uint256,uint128,uint256,uint256)")),
+                    format!("{:#x}",alloy::primitives::keccak256("Collect(uint256,address,uint256,uint256)"))
+                ]]}]),
             ],
             ecfg.websocket,
             evm_tx,
@@ -166,20 +174,11 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
     let mut chain = Value::Null;
     let mut hbusy = false;
     let mut ebusy = false;
-    let mut vbusy = false;
-    let mut volume_report = Value::Null;
-    let mut volume_error: Option<String> = None;
     let mut herr: Option<String> = None;
     let mut eerr: Option<String> = None;
-    let mut volume = match store.read::<volume::Volume>("monitor_volume.json") {
-        Ok(v) => v.unwrap_or_default(),
-        Err(e) => {
-            tracing::warn!(error=%e,"rebuild invalid monitoring cache from confirmed chain logs");
-            volume::Volume::default()
-        }
-    };
-    let mut last_swap = Value::Null;
     let mut account_ws = Value::Null;
+    let mut rpc_reported = venue.rpc.request_count();
+    let mut rpc_report_time = Instant::now();
     tracing::info!(mode=?c.mode, hl_seconds=c.monitoring.hyperliquid_interval_seconds, lp_seconds=c.monitoring.robinhood_interval_seconds, "monitor started");
     let result:Result<()> = async {
         loop {
@@ -209,13 +208,8 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                 }},
                 e=evm_rx.recv()=>{if let Some(e)=e {
                     eh.update(&e);
-                    if e.channel=="connected" || e.channel=="disconnected" {last_swap=Value::Null;}
-                    if e.channel=="logs" {
-                        match crate::evm::events::decode(&e.data) {
-                            Ok(log)=>{if log["kind"]=="Swap" {last_swap=json!({"received_ms":e.received_ms,"fields":log["fields"],"block":log["blockNumber"],"transaction_hash":log["transactionHash"],"removed":log["removed"]});}
-                                tracing::debug!(event=%log,"pool websocket event; confirmed volume is backfilled separately");},
-                            Err(err)=>tracing::warn!(error=%err,"invalid pool websocket event"),
-                        }
+                    if let Err(error)=venue.observations.on_event(&e,&c.liquidity) {
+                        tracing::warn!(error=%error,"WSS 观察无效；保留 RPC 核对，不使用异常推送");
                     }
                 }},
                 _=htimer.tick()=>{
@@ -240,29 +234,28 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                     }
                 },
                 _=etimer.tick()=>{
+                    let rpc_total=venue.rpc.request_count();
+                    let rpc_requests=json!({"started":rpc_total.saturating_sub(rpc_reported),"interval_seconds":rpc_report_time.elapsed().as_secs_f64(),"total":rpc_total});
+                    rpc_reported=rpc_total;rpc_report_time=Instant::now();
                     let mut report=json!({"market":crate::liquidity::chains::labels(&c.liquidity),"time_ms":crate::now_ms(),"mode":c.mode,"max_data_age_seconds":c.strategy.max_data_age_seconds,"ws":eh,"ws_data_age_ms":eh.last_data_ms.map(|t|crate::now_ms().saturating_sub(t)),"snapshot":chain,
-                        "snapshot_age_ms":chain["observed_ms"].as_u64().map(|t|crate::now_ms().saturating_sub(t)),"volume_age_ms":volume_report["as_of_ms"].as_u64().map(|t|crate::now_ms().saturating_sub(t)),"last_unconfirmed_swap":last_swap,"refresh_pending":ebusy,"last_refresh_error":eerr,"recent_volume":volume_report,"volume_refresh_pending":vbusy,"volume_error":volume_error});
+                        "rpc_requests":rpc_requests,
+                        "rpc_cooldown_seconds":venue.rpc.cooldown_remaining().as_secs_f64().ceil() as u64,
+                        "history_rpc_cooldown_seconds":venue.archive_rpc.cooldown_remaining().as_secs_f64().ceil() as u64,
+                        "runtime":store.read::<Value>("runtime_health.json")?,
+                        "snapshot_age_ms":chain["observed_ms"].as_u64().map(|t|crate::now_ms().saturating_sub(t)),"last_unconfirmed_swap":venue.observations.latest_swap(),"refresh_pending":ebusy,"last_refresh_error":eerr,"volume_enabled":false});
                     denomination::normalize(&mut report, c.liquidity.chain_id == 4663);
                     tracing::info!("\n{}",display::liquidity(&report));
                     tracing::debug!(report=%report,"LP status raw snapshot");
                     if store.is_writable() {store.write(crate::liquidity::chains::monitor_file(&c.liquidity),&report)?;}
                 },
                 _=erefresh.tick()=>{
-                    if !ebusy {
+                    if !ebusy && venue.rpc.cooldown_remaining().is_zero() {
                         ebusy=true;let cfg=c.clone();let v=venue.clone();let s=store.clone();
                         let anchor=performance.positions.values().filter_map(|h|h.samples.back())
                             .filter(|sample|crate::now_ms().saturating_sub(sample.time_ms)<=c.strategy.max_data_age_seconds*1000)
                             .max_by_key(|sample|sample.block).map(|sample|(performance.identity.clone(),sample.block,sample.block_hash.clone()));
                         jobs.spawn(async move { Refresh::Liquidity(match tokio::time::timeout(Duration::from_secs(cfg.monitoring.refresh_timeout_seconds),
                             refresh_chain(&cfg,&v,&s,anchor)).await {Ok(v)=>v,Err(e)=>Err(e.into())}) });
-                    }
-                    if !vbusy {
-                        vbusy=true;let cfg=c.clone();let v=venue.clone();let mut vol=volume.clone();
-                        jobs.spawn(async move {Refresh::Volume(match tokio::time::timeout(Duration::from_secs(cfg.monitoring.refresh_timeout_seconds),async {
-                            let snapshot=v.snapshot().await?;
-                            vol.refresh(&cfg,&v,&snapshot).await?;
-                            Ok((vol.report(&snapshot,cfg.monitoring.volume_window_seconds),vol))
-                        }).await {Ok(r)=>r,Err(e)=>Err(e.into())})});
                     }
                 },
                 r=jobs.join_next(), if !jobs.is_empty()=>{
@@ -276,7 +269,6 @@ pub async fn run(c: Config, store: Arc<Store>, mut shutdown: watch::Receiver<boo
                             }
                             chain=v;eerr=None;
                         },Err(e)=>{eerr=Some(format!("{e:#}"));tracing::warn!(error=%e,"LP refresh failed; previous snapshot retained with its timestamp");}}},
-                        Refresh::Volume(r)=>{vbusy=false;match r {Ok((v,vol))=>{volume_report=v;volume=vol;volume_error=None;if store.is_writable(){store.write("monitor_volume.json",&volume)?;}},Err(e)=>{volume_error=Some(format!("{e:#}"));tracing::warn!(error=%e,"volume refresh failed; LP price and position reporting continues");}}},
                     }
                 }
             }
@@ -297,7 +289,46 @@ async fn refresh_chain(
     store: &Store,
     previous: Option<(Value, u64, String)>,
 ) -> Result<Value> {
-    let snapshot = venue.snapshot().await?;
+    let epoch = venue.observations.epoch();
+    let identity = store.read::<Value>("execution_identity.json")?;
+    let owner = c.liquidity.owner.as_deref().or_else(|| {
+        identity
+            .as_ref()
+            .filter(|v| v["chain_id"] == c.liquidity.chain_id)
+            .and_then(|v| v["owner"].as_str())
+    });
+    let registered = store
+        .read::<BTreeMap<String, String>>("nfts.json")?
+        .unwrap_or_default();
+    let registered_ids: Vec<_> = registered
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let recent = if c.mode == Mode::Live {
+        owner
+            .map(|owner| -> Result<_> {
+                let owner = owner.parse()?;
+                // 至少每分钟完整枚举一次，避免仅靠 NFT 推送漏掉外部转入/转出。
+                if !venue.observations.inventory_recent(owner, &registered_ids) {
+                    return Ok(None);
+                }
+                Ok(venue.observations.positions(
+                    owner,
+                    &registered_ids,
+                    Duration::from_secs(c.monitoring.robinhood_refresh_seconds.min(15)),
+                ))
+            })
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
+    let snapshot = if let Some(v) = &recent {
+        v.snapshot.clone()
+    } else {
+        venue.snapshot().await?
+    };
+    let observed_ms = recent.as_ref().map(|v| v.observed_ms);
     let phase = store.read::<Value>("strategy.json")?;
     let mut positions_observed = true;
     let mut accounting_revisions = BTreeMap::new();
@@ -320,35 +351,29 @@ async fn refresh_chain(
             )
         }
     } else {
-        let identity = store.read::<Value>("execution_identity.json")?;
-        let owner = c.liquidity.owner.as_deref().or_else(|| {
-            identity
-                .as_ref()
-                .filter(|v| v["chain_id"] == c.liquidity.chain_id)
-                .and_then(|v| v["owner"].as_str())
-        });
         let positions = if let Some(owner) = owner {
             accounting_identity = json!({"chain_id":c.liquidity.chain_id,"pool":c.liquidity.pool.to_ascii_lowercase(),
                 "manager":c.liquidity.position_manager.to_ascii_lowercase(),"owner":owner.to_ascii_lowercase(),
                 "base_decimals":c.liquidity.base_decimals,"quote_decimals":c.liquidity.quote_decimals});
-            let ids = venue
-                .token_ids_at(owner.parse()?, &format!("0x{:x}", snapshot.block))
-                .await?;
-            let registered = store
-                .read::<BTreeMap<String, String>>("nfts.json")?
-                .unwrap_or_default();
-            let ids = ids
-                .into_iter()
-                .map(|id| {
-                    let layer = registered
-                        .iter()
-                        .find(|(_, v)| **v == id)
-                        .map(|(k, _)| k.clone())
-                        .unwrap_or_else(|| "unregistered".into());
-                    (layer, id)
-                })
-                .collect::<Vec<_>>();
-            let observed = venue.position_observations(owner, &ids, &snapshot).await?;
+            let observed = if let Some(v) = recent {
+                v.rows
+            } else {
+                let ids = venue
+                    .token_ids_at(owner.parse()?, &format!("0x{:x}", snapshot.block))
+                    .await?;
+                let ids = ids
+                    .into_iter()
+                    .map(|id| {
+                        let layer = registered
+                            .iter()
+                            .find(|(_, v)| **v == id)
+                            .map(|(k, _)| k.clone())
+                            .unwrap_or_else(|| "unregistered".into());
+                        (layer, id)
+                    })
+                    .collect::<Vec<_>>();
+                venue.position_observations(owner, &ids, &snapshot).await?
+            };
             observed
                 .into_iter()
                 .map(|(p, revision)| {
@@ -379,25 +404,11 @@ async fn refresh_chain(
         if let Some((_, block, hash)) =
             previous.filter(|(identity, _, _)| *identity == accounting_identity)
         {
-            reorg = block > snapshot.block
-                || venue
-                    .rpc
-                    .request(
-                        "eth_getBlockByNumber",
-                        json!([format!("0x{block:x}"), false]),
-                    )
-                    .await?["hash"]
-                    != hash;
+            reorg = block > snapshot.block || venue.canonical_hash(block).await? != hash;
         }
-        let canonical = venue
-            .rpc
-            .request(
-                "eth_getBlockByNumber",
-                json!([format!("0x{:x}", snapshot.block), false]),
-            )
-            .await?;
+        let canonical = venue.canonical_hash(snapshot.block).await?;
         anyhow::ensure!(
-            canonical["hash"] == snapshot.block_hash,
+            canonical == snapshot.block_hash,
             "LP observation block changed during sampling"
         );
     }
@@ -409,8 +420,9 @@ async fn refresh_chain(
             p["accounting_revision"] = json!(revision);
         }
     }
+    venue.observations.ensure_epoch(epoch)?;
     Ok(
-        json!({"observed_ms":crate::now_ms(),"mode":c.mode,"pool":snapshot,"accounting_identity":accounting_identity,"accounting_reorg":reorg,
+        json!({"observed_ms":observed_ms.unwrap_or_else(crate::now_ms),"observation_source":if observed_ms.is_some(){"shared_confirmed"}else{"confirmed_read"},"mode":c.mode,"pool":snapshot,"accounting_identity":accounting_identity,"accounting_reorg":reorg,
         "positions_observed":positions_observed,"positions":reports,"returns":pnl,"strategy":phase}),
     )
 }

@@ -205,11 +205,16 @@ async fn run_strategy(
     let mut fetched_hour = 0;
     let _nonce_worker = live.as_ref().map(|l| {
         let liquidity=l.liquidity.clone();let seconds=c.liquidity.nonce_refresh_seconds;
+        let rpc=venue.rpc.clone();
         NonceWorker(tokio::spawn(async move {
             let mut timer=tokio::time::interval(Duration::from_secs(seconds));
             timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 timer.tick().await;
+                if !rpc.cooldown_remaining().is_zero() {
+                    tracing::debug!("nonce 定时查询等待 RPC 退避；发送交易前仍需重新核对");
+                    continue;
+                }
                 if let Err(e)=liquidity.refresh_execution_state().await {
                     tracing::warn!(error=%format!("{e:#}"),"periodic nonce refresh failed; every send still requires a fresh successful check");
                 }
@@ -319,9 +324,17 @@ async fn run_strategy(
                 .any(|r| r.starts_with("stale_or_invalid_data"))
         {
             if let Some(l) = &live {
-                l.apply(&d).await?;
-                l.sync_orders(false).await?;
-                strategy.observe_lp(!l.portfolio().await?.positions.is_empty());
+                if d.lp == LpIntent::Hold {
+                    l.hold_observed(&d, &frame.portfolio, frame.pool.time_ms)
+                        .await?;
+                    l.sync_orders(false).await?;
+                    // Hold 只操作合约对冲，不改变 LP；下一轮继续核对链上库存。
+                    strategy.observe_lp(!frame.portfolio.positions.is_empty());
+                } else {
+                    l.apply(&d).await?;
+                    l.sync_orders(false).await?;
+                    strategy.observe_lp(!l.portfolio().await?.positions.is_empty());
+                }
             } else {
                 paper.apply(&d, &c, frame.pool.price, hp, now)?;
                 strategy.observe_lp(!paper.portfolio.positions.is_empty());
@@ -386,6 +399,7 @@ pub fn transport_independent_fingerprint(serialized: &str) -> Result<Value> {
             vec![
                 "rpc_url",
                 "archive_rpc_url",
+                "rpc_min_interval_ms",
                 "ws_url",
                 "nonce_refresh_seconds",
                 "pending_warn_seconds",

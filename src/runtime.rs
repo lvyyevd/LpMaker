@@ -12,6 +12,33 @@ impl fmt::Display for ReadUnavailable {
     }
 }
 impl std::error::Error for ReadUnavailable {}
+
+/// 单调时钟截止时间，跨 RPC 客户端重建仍沿用剩余退避时间。
+/// 只是重试提示；写操作即使带有此提示也不能成为可自动重试的读取错误。
+#[derive(Debug, Clone, Copy)]
+pub struct RetryAfter(pub tokio::time::Instant);
+impl fmt::Display for RetryAfter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "RPC 共享退避，约 {} 秒后允许重试",
+            self.0
+                .saturating_duration_since(tokio::time::Instant::now())
+                .as_secs_f64()
+                .ceil() as u64
+        )
+    }
+}
+impl std::error::Error for RetryAfter {}
+
+pub fn retry_delay(error: &anyhow::Error, minimum: Duration) -> Duration {
+    error.downcast_ref::<RetryAfter>().map_or(minimum, |hint| {
+        minimum.max(
+            hint.0
+                .saturating_duration_since(tokio::time::Instant::now()),
+        )
+    })
+}
 pub fn retryable(error: &anyhow::Error) -> bool {
     error.is::<ReadUnavailable>()
 }
@@ -61,12 +88,15 @@ where
     loop {
         match task().await {
             Err(e) if !once && retryable(&e) => {
-                let details = json!({"error":format!("{e:#}"),"retry_seconds":delay.as_secs(),
+                let wait = retry_delay(&e, delay);
+                let seconds = wait.as_secs_f64().ceil() as u64;
+                let details = json!({"error":format!("{e:#}"),"retry_seconds":seconds,
+                    "retry_at_ms":crate::now_ms().saturating_add(wait.as_millis().min(u64::MAX as u128) as u64),
                     "action":"pause new operations; reload checkpoint and reconcile before resuming"});
                 status(store, "degraded", details.clone())?;
                 store.event("read_recovery_wait", &details)?;
-                tracing::warn!(error=%format!("{e:#}"), "read unavailable; restart reconciliation after backoff");
-                tokio::time::sleep(delay).await;
+                tracing::warn!(error=%format!("{e:#}"), retry_seconds=seconds, "read unavailable; restart reconciliation after backoff");
+                tokio::time::sleep(wait).await;
             }
             result => return result,
         }

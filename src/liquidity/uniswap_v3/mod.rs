@@ -3,6 +3,7 @@ pub mod abi;
 pub mod events;
 pub(crate) use crate::evm::{fees, nonce, rpc};
 pub mod mint;
+pub mod observations;
 pub mod quote;
 pub mod slippage;
 pub mod tx;
@@ -16,6 +17,7 @@ use anyhow::{Context, Result, ensure};
 use async_trait::async_trait;
 use rpc::{Rpc, address_word, signed_tick, tick_word, word_address};
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct UniswapV3 {
@@ -27,6 +29,7 @@ pub struct UniswapV3 {
     pub router: Address,
     pub base: Address,
     pub quote: Address,
+    pub observations: Arc<observations::Shared>,
 }
 impl UniswapV3 {
     async fn snapshot_at(&self, number: u64) -> Result<PoolSnapshot> {
@@ -35,17 +38,31 @@ impl UniswapV3 {
             .rpc
             .request("eth_getBlockByNumber", json!([tag, false]))
             .await?;
+        self.snapshot_with_header(number, &header).await
+    }
+    async fn tick_spacing(&self) -> Result<i32> {
+        let _guard = self.observations.spacing_lock.lock().await;
+        if let Some(spacing) = self.observations.spacing() {
+            return Ok(spacing);
+        }
+        let spacing = signed_tick(
+            self.rpc
+                .words(self.pool, "tickSpacing()", &[], "latest")
+                .await?[0],
+        );
+        ensure!(spacing > 0, "invalid pool tick spacing");
+        self.observations.set_spacing(spacing);
+        Ok(spacing)
+    }
+    async fn snapshot_with_header(&self, number: u64, header: &Value) -> Result<PoolSnapshot> {
+        let tag = format!("0x{number:x}");
         let slot = self.rpc.words(self.pool, "slot0()", &[], &tag).await?;
         ensure!(
             slot.len() == 7 && slot[6] != U256::ZERO,
             "uninitialized/locked pool"
         );
         let l = self.rpc.words(self.pool, "liquidity()", &[], &tag).await?[0];
-        let spacing = signed_tick(
-            self.rpc
-                .words(self.pool, "tickSpacing()", &[], &tag)
-                .await?[0],
-        );
+        let spacing = self.tick_spacing().await?;
         let base0 = self.base < self.quote;
         let sqrt = slot[0].to_string().parse::<f64>()? / 2_f64.powi(96);
         let raw = sqrt * sqrt;
@@ -73,13 +90,65 @@ impl UniswapV3 {
         self.snapshot_at(self.rpc.block_number().await?).await
     }
 
+    /// 明确的执行/恢复读取不使用只读快照缓存；保留原确认数。
+    pub async fn fresh_snapshot(&self) -> Result<PoolSnapshot> {
+        self.snapshot_at(
+            self.rpc
+                .block_number()
+                .await?
+                .saturating_sub(self.cfg.confirmations),
+        )
+        .await
+    }
+
+    /// 同一确认块的重复合约读取合并；latest 余额、nonce、报价及签名预检不走缓存。
+    async fn words_at(
+        &self,
+        snap: &PoolSnapshot,
+        to: Address,
+        signature: &str,
+        args: &[U256],
+    ) -> Result<Vec<U256>> {
+        let key = json!([snap.block, snap.block_hash, to, signature, args]).to_string();
+        let _guard = self.observations.read_lock.lock().await;
+        if let Some(words) = self.observations.words(&key) {
+            return Ok(words);
+        }
+        let epoch = self.observations.epoch();
+        let words = self
+            .rpc
+            .words(to, signature, args, &format!("0x{:x}", snap.block))
+            .await?;
+        self.observations.ensure_epoch(epoch)?;
+        self.observations.save_words(epoch, key, words.clone());
+        Ok(words)
+    }
+
+    pub async fn canonical_hash(&self, number: u64) -> Result<String> {
+        if let Some(hash) = self.observations.canonical_hash(number) {
+            return Ok(hash);
+        }
+        Ok(self
+            .rpc
+            .request(
+                "eth_getBlockByNumber",
+                json!([format!("0x{number:x}"), false]),
+            )
+            .await?["hash"]
+            .as_str()
+            .context("block hash")?
+            .to_string())
+    }
+
     pub fn new(cfg: LiquidityConfig) -> Result<Self> {
         Ok(Self {
-            rpc: Rpc::new(cfg.rpc_url.clone())?,
-            archive_rpc: Rpc::new(
+            observations: observations::Shared::for_pool(&cfg),
+            rpc: Rpc::with_min_interval(cfg.rpc_url.clone(), cfg.rpc_min_interval_ms)?,
+            archive_rpc: Rpc::with_min_interval(
                 cfg.archive_rpc_url
                     .clone()
                     .unwrap_or_else(|| cfg.rpc_url.clone()),
+                cfg.rpc_min_interval_ms,
             )?,
             pool: cfg.pool.parse()?,
             manager: cfg.position_manager.parse()?,
@@ -129,6 +198,8 @@ impl UniswapV3 {
         block: &str,
         include_empty: bool,
     ) -> Result<Vec<String>> {
+        self.observations.watch_owner(owner);
+        let epoch = self.observations.epoch();
         let count = self
             .rpc
             .words(
@@ -164,6 +235,8 @@ impl UniswapV3 {
                 ids.push(id.to_string());
             }
         }
+        self.observations.ensure_epoch(epoch)?;
+        self.observations.inventory_checked(epoch, owner, &ids);
         Ok(ids)
     }
     pub async fn position_words(&self, id: U256, block: &str) -> Result<Vec<U256>> {
@@ -181,31 +254,30 @@ impl UniswapV3 {
         );
         self.archive_rpc.request("eth_getLogs",json!([{"address":self.pool,"fromBlock":format!("0x{from:x}"),"toBlock":format!("0x{to:x}")}])).await
     }
-    async fn unclaimed(&self, position: &[U256], tick: i32, block: &str) -> Result<(U256, U256)> {
+    async fn unclaimed(&self, position: &[U256], snap: &PoolSnapshot) -> Result<(U256, U256)> {
+        let tick = snap.tick;
         let lower = self
-            .rpc
-            .words(
+            .words_at(
+                snap,
                 self.pool,
                 "ticks(int24)",
                 &[tick_word(signed_tick(position[5]))],
-                block,
             )
             .await?;
         let upper = self
-            .rpc
-            .words(
+            .words_at(
+                snap,
                 self.pool,
                 "ticks(int24)",
                 &[tick_word(signed_tick(position[6]))],
-                block,
             )
             .await?;
         ensure!(lower.len() >= 4 && upper.len() >= 4, "tick ABI mismatch");
         let mut out = [U256::ZERO; 2];
         for i in 0..2 {
             let global = self
-                .rpc
-                .words(
+                .words_at(
+                    snap,
                     self.pool,
                     if i == 0 {
                         "feeGrowthGlobal0X128()"
@@ -213,7 +285,6 @@ impl UniswapV3 {
                         "feeGrowthGlobal1X128()"
                     },
                     &[],
-                    block,
                 )
                 .await?[0];
             let below = if tick >= signed_tick(position[5]) {
@@ -331,12 +402,46 @@ impl LiquidityVenue for UniswapV3 {
         Ok(())
     }
     async fn snapshot(&self) -> Result<PoolSnapshot> {
-        let number = self
-            .rpc
-            .block_number()
+        let _guard = self.observations.snapshot_lock.lock().await;
+        if let Some(snapshot) = self.observations.snapshot() {
+            return Ok(snapshot);
+        }
+        let epoch = self.observations.epoch();
+        let snapshot = if let Some((head, anchor_needed)) =
+            self.observations.confirmed_header(self.cfg.confirmations)
+        {
+            if anchor_needed {
+                let canonical = self
+                    .rpc
+                    .request(
+                        "eth_getBlockByNumber",
+                        json!([format!("0x{:x}", head.number), false]),
+                    )
+                    .await?;
+                if !canonical["hash"]
+                    .as_str()
+                    .is_some_and(|hash| hash.eq_ignore_ascii_case(&head.hash))
+                    || rpc::hex_u64(&canonical["timestamp"])
+                        .ok()
+                        .and_then(|t| t.checked_mul(1000))
+                        != Some(head.time_ms)
+                {
+                    self.observations.reject_feed();
+                    return Err(crate::runtime::ReadUnavailable("WSS/RPC block mismatch or RPC behind; discard stream anchor and reconcile before acting".into()).into());
+                }
+                self.observations.anchored(epoch);
+            }
+            self.snapshot_with_header(
+                head.number,
+                &json!({"hash":head.hash,"timestamp":format!("0x{:x}",head.time_ms/1000)}),
+            )
             .await?
-            .saturating_sub(self.cfg.confirmations);
-        self.snapshot_at(number).await
+        } else {
+            self.fresh_snapshot().await?
+        };
+        self.observations.ensure_epoch(epoch)?;
+        self.observations.save_snapshot(epoch, &snapshot);
+        Ok(snapshot)
     }
     async fn positions(&self, owner: &str, ids: &[(String, String)]) -> Result<Vec<LpPosition>> {
         let snap = self.snapshot().await?;
@@ -358,19 +463,22 @@ impl UniswapV3 {
         snap: &PoolSnapshot,
     ) -> Result<Vec<(LpPosition, String)>> {
         let owner: Address = owner.parse()?;
-        let block = format!("0x{:x}", snap.block);
+        self.observations.watch_owner(owner);
+        let epoch = self.observations.epoch();
         let mut out = vec![];
         for (layer, id) in ids {
             let id = U256::from_str_radix(id, 10)?;
             ensure!(
                 word_address(
-                    self.rpc
-                        .words(self.manager, "ownerOf(uint256)", &[id], &block)
+                    self.words_at(snap, self.manager, "ownerOf(uint256)", &[id])
                         .await?[0]
                 ) == owner,
                 "NFT not owned by configured wallet"
             );
-            let p = self.position_words(id, &block).await?;
+            let p = self
+                .words_at(snap, self.manager, "positions(uint256)", &[id])
+                .await?;
+            ensure!(p.len() == 12, "invalid NFPM position");
             let (t0, t1) = if self.base < self.quote {
                 (self.base, self.quote)
             } else {
@@ -400,7 +508,7 @@ impl UniswapV3 {
                 / 10_f64
                     .powf((self.cfg.base_decimals as f64 + self.cfg.quote_decimals as f64) / 2.0);
             let (mut base, mut quote) = math::amounts(liquidity, lower, upper, snap.price);
-            let (f0, f1) = self.unclaimed(&p, snap.tick, &block).await?;
+            let (f0, f1) = self.unclaimed(&p, snap).await?;
             let (fb, fq) = if snap.base_is_token0 {
                 (f0, f1)
             } else {
@@ -427,6 +535,9 @@ impl UniswapV3 {
                 ),
             ));
         }
+        self.observations.ensure_epoch(epoch)?;
+        self.observations
+            .save_positions(epoch, owner, ids, snap, &out);
         Ok(out)
     }
 }

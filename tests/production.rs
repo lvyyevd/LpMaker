@@ -50,6 +50,35 @@ async fn uncertain_write_and_state_errors_are_never_automatically_retried() {
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
 }
 
+#[tokio::test(start_paused = true)]
+async fn read_retry_waits_for_provider_deadline_and_preserves_pending() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    store
+        .begin(json!({"venue":"evm","hash":"unchanged","nonce":7}))
+        .unwrap();
+    let pending = store.pending().unwrap();
+    let start = tokio::time::Instant::now();
+    let attempts = AtomicUsize::new(0);
+    runtime::retry_reads(&store, Duration::from_secs(5), false, || async {
+        if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(
+                anyhow::Error::new(runtime::ReadUnavailable("rate limited".into()))
+                    .context(runtime::RetryAfter(start + Duration::from_secs(120))),
+            );
+        }
+        assert!(start.elapsed() >= Duration::from_secs(120));
+        let health = store.read::<Value>("runtime_health.json")?.unwrap();
+        assert_eq!(health["details"]["retry_seconds"], 120);
+        assert_eq!(health["status"], "degraded");
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(store.pending().unwrap(), pending);
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+}
+
 #[tokio::test]
 async fn observation_timeout_and_future_or_stale_timestamps_fail_closed() {
     let result: anyhow::Result<()> =

@@ -26,6 +26,7 @@ emergency_slippage_bps = 30
 kind = "uniswap_v3"
 chain_id = 8453
 rpc_url = "https://base-rpc.publicnode.com"
+rpc_min_interval_ms = 250 # 同地址所有 RPC 请求合计，默认最多约 4 次/秒
 # 历史查询使用同链节点；可单独配置提供历史查询能力的节点。
 archive_rpc_url = "https://base-rpc.publicnode.com"
 ws_url = "wss://base-rpc.publicnode.com"
@@ -104,8 +105,6 @@ hyperliquid_interval_seconds = 60
 liquidity_interval_seconds = 60
 hyperliquid_refresh_seconds = 30
 liquidity_refresh_seconds = 15
-volume_window_seconds = 300
-backfill_blocks = 6000
 refresh_timeout_seconds = 45
 
 [logging]
