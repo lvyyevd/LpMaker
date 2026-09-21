@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Linux 默认实盘：退出当前池和配置对冲币，核实空仓后清空活动记录，再按首仓启动。
+# Linux 默认实盘：退出当前池和配置对冲币，核对余额（含限额尾差）后归档重置，再按首仓启动。
 set -euo pipefail
 umask 077
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -24,7 +24,7 @@ flock -w 30 data/live-200/process.lock true
 
 mkdir -p data/operator-logs
 lp_exit_log=$(mktemp "$PWD/data/operator-logs/exit-reset.log.XXXXXXXX")
-echo "开始实盘退出；LP/WETH/对冲平仓、确认和备份日志：$lp_exit_log"
+echo "开始实盘退出；LP/对冲平仓、基础币兑换及尾差核对、备份日志：$lp_exit_log"
 # pipefail：平仓失败、部分成交未清完、余额查询失败或备份失败，均不执行后面的重启。
 ./target/release/lp-maker --config config/local.toml reset-flat --execute 2>&1 | tee "$lp_exit_log"
 
@@ -34,4 +34,4 @@ if [ -f run.log ]; then
 fi
 nohup ./target/release/lp-maker --config config/local.toml run --execute \
   8>&- </dev/null >run.log 2>&1 &
-echo "已平仓并重置；启动 PID：$!；日志：$PWD/run.log"
+echo "可交易仓位已退出并重置（若有微小尾差已记录）；启动 PID：$!；日志：$PWD/run.log"

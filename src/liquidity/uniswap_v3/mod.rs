@@ -1,5 +1,6 @@
 //! Uniswap V3 共用适配器：负责 NFT、tick、代币精度和合约调用，策略不依赖这些细节。
 pub mod abi;
+pub mod dust;
 pub mod events;
 pub(crate) use crate::evm::{fees, nonce, rpc};
 pub mod mint;

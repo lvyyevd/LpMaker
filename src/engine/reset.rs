@@ -4,7 +4,7 @@ use crate::{
     config::{Config, Mode},
     domain::{HedgeVenue, LiquidityVenue},
     hyperliquid::{Client, journal, orders},
-    liquidity::uniswap_v3::tx::Executor,
+    liquidity::uniswap_v3::{dust::BaseDust, tx::Executor},
     store::Store,
 };
 use alloy::primitives::U256;
@@ -36,6 +36,7 @@ enum Step {
 struct Proof {
     lp_ids: Vec<String>,
     base_raw: String,
+    base_dust: Option<BaseDust>,
     hedge_size: String,
     open_orders: usize,
     pending: bool,
@@ -45,13 +46,24 @@ impl Proof {
     fn validate(&self) -> Result<()> {
         ensure!(
             self.lp_ids.is_empty()
-                && U256::from_str_radix(&self.base_raw, 10)? == U256::ZERO
                 && Decimal::from_str(&self.hedge_size)?.is_zero()
                 && self.open_orders == 0
                 && !self.pending
                 && self.unresolved_orders == 0,
             "仍有 LP/代币/合约/挂单或未决记录，未清空状态、未重启；请查看退出日志后再运行同一命令"
         );
+        let base = U256::from_str_radix(&self.base_raw, 10)?;
+        if !base.is_zero() {
+            self.base_dust
+                .as_ref()
+                .context("基础币余额非零且没有本次核对的尾差证据，保留原状态")?
+                .validate(base)?;
+        } else {
+            ensure!(
+                self.base_dust.is_none(),
+                "zero balance has inconsistent dust evidence"
+            );
+        }
         Ok(())
     }
 }
@@ -62,7 +74,7 @@ trait Actions {
     async fn observe(&self) -> Result<Proof>;
 }
 
-async fn flatten(a: &impl Actions, store: &Store) -> Result<()> {
+async fn flatten(a: &impl Actions, store: &Store) -> Result<Option<BaseDust>> {
     let mut marker = store
         .read::<Value>(MARKER)?
         .context("missing reset marker")?;
@@ -80,17 +92,21 @@ async fn flatten(a: &impl Actions, store: &Store) -> Result<()> {
         a.perform(step).await?;
     }
     // 连续两次读取真实余额；IOC 的成功回执不等于仓位已经全部成交。
+    let mut retained_dust = None;
     for _ in 0..2 {
         let proof = a.observe().await?;
+        store.event("manual_exit_verification", &proof)?;
         store.write(
             "manual_reset_proof.json",
             &json!({"observed_ms":crate::now_ms(),"proof":proof}),
         )?;
         proof.validate()?;
+        retained_dust = proof.base_dust;
     }
     marker["stage"] = json!("verified_flat");
+    marker["retained_base_dust"] = serde_json::to_value(&retained_dust)?;
     store.write(MARKER, &marker)?;
-    Ok(())
+    Ok(retained_dust)
 }
 
 struct LiveExit<'a> {
@@ -358,7 +374,9 @@ impl Actions for LiveExit<'_> {
                     .await?
                     > U256::ZERO
                 {
-                    tracing::info!("将钱包中全部基础代币兑换为本池报价币，保留原生 Gas 币");
+                    tracing::info!(
+                        "核对并兑换基础代币；严格限额的微小尾差保留并记录，原生 Gas 币保留"
+                    );
                     self.evm.sell_all_base().await?;
                 }
                 Ok(())
@@ -369,14 +387,26 @@ impl Actions for LiveExit<'_> {
     async fn observe(&self) -> Result<Proof> {
         self.evm.nonce.refresh().await?.available()?;
         journal::refresh(&self.hl, &self.store).await?;
+        let base = self
+            .evm
+            .venue
+            .balance(self.evm.venue.base, self.evm.owner())
+            .await?;
+        let base_dust = if base.is_zero() {
+            None
+        } else {
+            let snapshot = self.evm.venue.fresh_snapshot().await?;
+            crate::runtime::fresh(
+                snapshot.time_ms,
+                crate::now_ms(),
+                self.cfg.strategy.max_data_age_seconds,
+            )?;
+            BaseDust::assess(&self.cfg.liquidity, &snapshot, base)?
+        };
         let proof = Proof {
             lp_ids: self.evm.venue.exit_token_ids(self.evm.owner()).await?,
-            base_raw: self
-                .evm
-                .venue
-                .balance(self.evm.venue.base, self.evm.owner())
-                .await?
-                .to_string(),
+            base_raw: base.to_string(),
+            base_dust,
             hedge_size: hedge_size(
                 &self.hl.perp_account().await?,
                 &self.cfg.hyperliquid.hedge_coin,
@@ -427,7 +457,7 @@ pub async fn request(cfg: Config, store: Arc<Store>, execute: bool) -> Result<Va
     let evm = Executor::new(venue, store.clone())?;
     let mut hl = Client::new(cfg.hyperliquid.clone(), store.clone())?;
     hl.enable_signing().await?;
-    flatten(
+    let retained_dust = flatten(
         &LiveExit {
             cfg: &cfg,
             evm,
@@ -438,9 +468,10 @@ pub async fn request(cfg: Config, store: Arc<Store>, execute: bool) -> Result<Va
     )
     .await?;
     let backup = archive_and_clear(&store, Path::new(&cfg.state_dir))?;
-    tracing::info!(backup=%backup.display(),"已确认空仓并清空活动状态；旧记录完整归档，可按第一仓规则启动");
+    tracing::info!(backup=%backup.display(), retained_base_dust=?retained_dust,
+        "已确认 LP、合约及挂单退出；基础币余额为零或已核对微小尾差，旧记录完整归档，可按第一仓规则启动");
     Ok(
-        json!({"status":"flat_and_reset","backup":backup,"state_dir":cfg.state_dir,"pool":cfg.liquidity.pool,"hedge_coin":cfg.hyperliquid.hedge_coin}),
+        json!({"status":if retained_dust.is_some(){"flat_with_base_dust_and_reset"}else{"flat_and_reset"},"retained_base_dust":retained_dust,"backup":backup,"state_dir":cfg.state_dir,"pool":cfg.liquidity.pool,"hedge_coin":cfg.hyperliquid.hedge_coin}),
     )
 }
 
@@ -554,6 +585,7 @@ mod tests {
         Proof {
             lp_ids: vec![],
             base_raw: "0".into(),
+            base_dust: None,
             hedge_size: size.into(),
             open_orders: 0,
             pending: false,
@@ -675,7 +707,7 @@ mod tests {
         assert!(Store::open(root).is_ok());
     }
     #[test]
-    fn flat_proof_rejects_even_dust_pending_orders_and_unclaimed_lp() {
+    fn flat_proof_rejects_unproven_dust_pending_orders_and_unclaimed_lp() {
         let mut p = proof("0");
         assert!(p.validate().is_ok());
         p.base_raw = "1".into();
@@ -692,6 +724,95 @@ mod tests {
         let mut p = proof("0");
         p.unresolved_orders = 1;
         assert!(p.validate().is_err());
+    }
+    fn dust_proof() -> Proof {
+        let mut p = proof("0");
+        p.base_raw = "17".into();
+        p.base_dust = Some(BaseDust {
+            raw_base: p.base_raw.clone(),
+            raw_quote_ceiling: "1".into(),
+            base_decimals: 18,
+            quote_decimals: 6,
+            sqrt_price_x96: "3953120541360100857610261".into(),
+            base_is_token0: true,
+            block: 256,
+            block_hash: "0xcanonical".into(),
+            time_ms: crate::now_ms(),
+        });
+        p
+    }
+    #[test]
+    fn dust_evidence_must_match_balance_and_does_not_relax_other_checks() {
+        assert!(dust_proof().validate().is_ok());
+        let mut p = dust_proof();
+        p.base_raw = "18".into();
+        assert!(p.validate().is_err());
+        let mut p = dust_proof();
+        p.base_dust.as_mut().unwrap().raw_quote_ceiling = "0".into();
+        assert!(p.validate().is_err());
+        let mut p = dust_proof();
+        p.base_raw = "0".into();
+        assert!(p.validate().is_err());
+        for kind in 0..5 {
+            let mut p = dust_proof();
+            match kind {
+                0 => p.pending = true,
+                1 => p.open_orders = 1,
+                2 => p.hedge_size = "-0.0001".into(),
+                3 => p.lp_ids.push("7".into()),
+                _ => p.unresolved_orders = 1,
+            }
+            assert!(p.validate().is_err());
+        }
+    }
+    struct Observations(Mutex<std::collections::VecDeque<Proof>>);
+    #[async_trait::async_trait]
+    impl Actions for Observations {
+        async fn perform(&self, _: Step) -> Result<()> {
+            Ok(())
+        }
+        async fn observe(&self) -> Result<Proof> {
+            Ok(self.0.lock().unwrap().pop_front().unwrap())
+        }
+    }
+    #[tokio::test]
+    async fn verified_dust_is_archived_as_nonzero_balance_with_both_observations() {
+        let (dir, s) = setup();
+        let a = Observations(Mutex::new([dust_proof(), dust_proof()].into()));
+        let retained = flatten(&a, &s).await.unwrap().unwrap();
+        assert_eq!(retained.raw_base, "17");
+        assert!(a.0.lock().unwrap().is_empty());
+        let backup = archive_and_clear(&s, &dir.path().join("state")).unwrap();
+        let proof: Value =
+            serde_json::from_slice(&fs::read(backup.join("manual_reset_proof.json")).unwrap())
+                .unwrap();
+        assert_eq!(proof["proof"]["base_raw"], "17");
+        assert_eq!(proof["proof"]["base_dust"]["raw_quote_ceiling"], "1");
+        let events = fs::read_to_string(backup.join("events.jsonl")).unwrap();
+        assert_eq!(
+            events
+                .lines()
+                .filter(|l| l.contains("manual_exit_verification"))
+                .count(),
+            2
+        );
+    }
+    #[tokio::test]
+    async fn second_observation_with_larger_balance_stops_reset_and_keeps_state() {
+        let (dir, s) = setup();
+        let mut grown = dust_proof();
+        // 即使伪造“证据”使余额相等，超出估值限额仍不得清空状态。
+        grown.base_raw = "1000000000".into();
+        grown.base_dust.as_mut().unwrap().raw_base = grown.base_raw.clone();
+        let a = Observations(Mutex::new([dust_proof(), grown].into()));
+        assert!(flatten(&a, &s).await.is_err());
+        assert!(a.0.lock().unwrap().is_empty());
+        assert!(archive_and_clear(&s, &dir.path().join("state")).is_err());
+        assert!(s.read::<Value>("checkpoint.json").unwrap().is_some());
+        assert_ne!(
+            s.read::<Value>(MARKER).unwrap().unwrap()["stage"],
+            "verified_flat"
+        );
     }
     #[test]
     fn reset_cannot_target_project_or_parent_of_other_strategy_states() {

@@ -724,7 +724,7 @@ impl Executor {
     pub async fn swap(&self, sell_base: bool, amount: f64) -> Result<Value> {
         self.swap_amount(sell_base, Some(amount)).await
     }
-    /// 显式退出使用精确余额，避免 f64 换算留下几个 wei，或盲目增加数量造成超支。
+    /// 显式退出使用精确余额。严格限额的不可经济兑换尾差留在原钱包，并返回审计证据。
     pub async fn sell_all_base(&self) -> Result<Value> {
         self.swap_amount(true, None).await
     }
@@ -753,13 +753,28 @@ impl Executor {
             Some(amount) => super::bounded_amount(amount, di, balance)?,
             None => balance,
         };
+        if sell_base && amount.is_none() {
+            if input.is_zero() {
+                return Ok(json!({"status":"base_already_empty"}));
+            }
+            if let Some(dust) = super::dust::BaseDust::assess(&self.venue.cfg, &s, input)? {
+                crate::runtime::fresh(s.time_ms, crate::now_ms(), 60)?;
+                self.store.event("manual_exit_base_dust_retained", &dust)?;
+                tracing::info!(raw_base=%dust.raw_base, raw_quote_ceiling=%dust.raw_quote_ceiling,
+                    quote_decimals=dust.quote_decimals, "手工退出保留极小基础币尾差；最多2个报价币最小单位，不发送兑换，最终核对将再次估值");
+                return Ok(json!({"status":"base_dust_retained","dust":dust}));
+            }
+        }
         ensure!(input > U256::ZERO, "zero swap");
         let expected = super::units(input, di)? * rate;
         let min_out = self
             .venue
             .minimum_swap_output(token_in, token_out, input, s.block, expected, do_)
             .await?;
-        ensure!(min_out > U256::ZERO, "zero minimum output");
+        ensure!(
+            min_out > U256::ZERO,
+            "zero minimum output: raw_input={input}, estimated_output={expected}, output_decimals={do_}; amount is not eligible for manual-exit dust handling; no swap broadcast"
+        );
         self.approve(token_in, self.venue.router, input).await?;
         let inner = IRouter02::exactInputSingleCall {
             params: IRouter02::ExactInputSingleParams {
