@@ -4,6 +4,8 @@ use anyhow::{Result, ensure};
 pub struct Metrics {
     pub return_1h: f64,
     pub vol_ratio: f64,
+    pub recent_vol: f64,
+    pub baseline_vol: f64,
     pub downtrend: bool,
     pub no_new_low: bool,
     pub ema_fast: f64,
@@ -73,6 +75,8 @@ pub fn calculate(candles: &[Candle], c: &StrategyConfig, now: u64) -> Result<Met
     Ok(Metrics {
         return_1h: last.close / closes[closes.len() - 2] - 1.0,
         vol_ratio,
+        recent_vol: recent,
+        baseline_vol: baseline,
         downtrend,
         no_new_low: last.low >= prev_low,
         ema_fast: fast,

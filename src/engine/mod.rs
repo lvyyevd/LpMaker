@@ -83,12 +83,13 @@ async fn run_strategy(
     venue.validate().await?;
     let mut hl = Client::new(c.hyperliquid.clone(), store.clone())?;
     let (mut strategy, mut paper) = recovery::load(&store, &c)?;
-    recovery::invalidate_observation_streaks(&mut strategy);
+    recovery::prepare_observation_revalidation(&mut strategy);
     recovery::stage(
         &store,
         "checkpoint_loaded",
         json!({"phase":strategy.phase,"mode":c.mode,
-        "note":"observation streaks reset across process downtime; balances and risk phase retained"}),
+        "healthy_hours":strategy.healthy_hours,
+        "note":"healthy-hour progress frozen pending fresh market/candle verification; breakout streaks reset; balances and risk phase retained"}),
     )?;
     let live = if c.mode == Mode::Live {
         ensure!(execute, "live runner requires --execute");
@@ -311,8 +312,11 @@ async fn run_strategy(
             defer_entry(&mut strategy, &previous, &mut d, &frame.portfolio);
             entry_deferred = d.lp == LpIntent::Hold;
         }
-        store.event("decision",json!({"decision":d,"pool":frame.pool,"equity":frame.portfolio.equity(frame.pool.price),"net_base":frame.portfolio.base()-frame.portfolio.short_base}))?;
+        store.event("decision",json!({"decision":d,"pool":frame.pool,"equity":frame.portfolio.equity(frame.pool.price),"net_base":frame.portfolio.base()-frame.portfolio.short_base,"recovery_progress":strategy.recovery_progress}))?;
         tracing::info!(phase=%d.state,entry_history=?strategy.entry_history,action=?d.lp,price=frame.pool.price,equity=frame.portfolio.equity(frame.pool.price),reasons=?d.reasons,"strategy decision");
+        if let Some(r) = &strategy.recovery_progress.report {
+            tracing::debug!(report=?r, last_reset=?strategy.recovery_progress.last_reset, "recovery conditions evaluated");
+        }
         if live.is_some() {
             entry_rearm::consume(&store, &c, &d)?;
             recovery::save(&store, &c, &strategy, &paper)?;

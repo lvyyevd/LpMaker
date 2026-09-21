@@ -139,6 +139,100 @@ pub fn robinhood(report: &Value) -> String {
     liquidity(report)
 }
 
+fn recovery_lines(lines: &mut Vec<String>, strategy: &Value, report: &Value) {
+    use crate::strategy::progress::reason_zh;
+    let progress = &strategy["recovery_progress"];
+    let r = &progress["report"];
+    if !r.is_object() {
+        return;
+    } // 兼容尚未产生诊断数据的旧检查点。
+    let pending = progress["pending_revalidation"] == true
+        || matches!(
+            report["runtime"]["status"].as_str(),
+            Some("starting" | "recovering" | "degraded")
+        );
+    let stale = r["observed_ms"]
+        .as_u64()
+        .zip(report["time_ms"].as_u64())
+        .is_none_or(|(t, now)| {
+            now.saturating_sub(t) > report["max_data_age_seconds"].as_u64().unwrap_or(60) * 1000
+        });
+    lines.push(format!(
+        "恢复检查{}：健康小时 {}/{}｜冷却剩余 {} 秒｜观察：{}",
+        if pending || stale {
+            "（上次观察，待重新核对）"
+        } else {
+            ""
+        },
+        n(&strategy["healthy_hours"], 0),
+        n(&r["required_hours"], 0),
+        n(&r["cooldown_remaining_seconds"], 0),
+        observed_age(&r["observed_ms"], report)
+    ));
+    lines.push(format!("  波动率：近{}小时 {}%｜此前{}小时 {}%｜比值 {}倍｜暂停 > {}倍｜恢复 < {}倍（小时对数收益率标准差）",
+        n(&r["recent_hours"], 0), n(&r["recent_vol_pct"],4),
+        n(&r["baseline_hours"], 0), n(&r["baseline_vol_pct"],4),
+        n(&r["vol_ratio"], 3), n(&r["pause_ratio"], 2), n(&r["resume_ratio"], 2)));
+    if number(&r["baseline_used_vol_pct"])
+        .zip(number(&r["baseline_vol_pct"]))
+        .is_some_and(|(used, raw)| used > raw)
+    {
+        lines.push(format!(
+            "  比值分母采用最低基准 {}%，避免接近零时除零。",
+            n(&r["baseline_used_vol_pct"], 4)
+        ));
+    }
+    let blockers = r["blockers"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(reason_zh)
+                .collect::<Vec<_>>()
+                .join("、")
+        })
+        .unwrap_or_default();
+    lines.push(format!(
+        "  市场条件：{}｜计数：{}",
+        if blockers.is_empty() {
+            "该次检查通过"
+        } else {
+            &blockers
+        },
+        if pending {
+            "已冻结，核对通过前不据此入场"
+        } else {
+            reason_zh(text(&r["counter_event"]))
+        }
+    ));
+    if let Some(ms) = r["completed_hour_ms"]
+        .as_u64()
+        .zip(report["time_ms"].as_u64())
+        .map(|(t, now)| now.saturating_sub(t))
+    {
+        lines.push(format!(
+            "  指标所用最新已完成小时K线：{:.1} 分钟前收盘；同一根K线不会重复累计。",
+            ms as f64 / 60_000.0
+        ));
+    }
+    let reset = &progress["last_reset"];
+    if reset.is_object() {
+        lines.push(format!(
+            "  最近清零：{}｜当时已积累 {} 小时｜{}秒前",
+            reason_zh(text(&reset["reason"])),
+            n(&reset["previous_hours"], 0),
+            amount(
+                reset["time_ms"]
+                    .as_u64()
+                    .zip(report["time_ms"].as_u64())
+                    .map(|(t, now)| now.saturating_sub(t) as f64 / 1000.0),
+                1
+            )
+        ));
+    }
+}
+
 pub fn liquidity(report: &Value) -> String {
     // 缺少标签的旧日志仍按 Robinhood 解释；新版运行器始终提供标签。
     let market = &report["market"];
@@ -182,6 +276,7 @@ pub fn liquidity(report: &Value) -> String {
             }
         ),
     ];
+    recovery_lines(&mut lines, strategy, report);
     let swap = &report["last_unconfirmed_swap"];
     if number(&swap["price"]).is_some() {
         lines.push(format!("WSS 实时 {price_symbol}：{} {quote}｜推送：{}｜未确认行情，LP 本金和 APR 仍按下方确认快照计算。",

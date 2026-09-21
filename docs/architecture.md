@@ -47,7 +47,7 @@ flowchart TD
     J --> K
 ```
 
-策略 `Warmup → Active → Paused → Recovering → Active`；账户回撤可以从任意状态进入 `Halted`。低波动慢跌和高波动快跌分开判断。暂停没有超时自动重建。连续计数只在新完成小时或新观察边界更新；缺失观察清零。
+策略 `Warmup → Active → Paused → Recovering → Active`；账户回撤可以从任意状态进入 `Halted`。低波动慢跌和高波动快跌分开判断。暂停没有超时自动重建。连续计数只在新完成小时或新观察边界更新；EVM 的短暂读故障先冻结健康小时，核对上次有效观察和 K 线后可在 5 分钟宽限内保留，无法核实时清零。连续越界计数仍在重启时清零。详见 [恢复进度](recovery.md#短暂-rpc-故障与健康小时保留)。
 
 平台接口有三层：`LiquidityVenue` 读取，`LiquidityExecutor` 修改库存/流动性，`HedgeVenue` 读取与合约订单。Live LP 编排依赖 `dyn LiquidityExecutor`，链 ID、手续费级别、token0/1 排序、NFT 和 ABI 均留在 V3 适配器内。当前启动工厂只注册 V3，避免未知协议被错误识别成 V3。
 

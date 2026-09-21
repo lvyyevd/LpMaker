@@ -174,7 +174,17 @@ pub fn start(store: &Store) -> Result<()> {
     )
 }
 pub fn invalidate_observation_streaks(strategy: &mut Strategy) {
-    strategy.healthy_hours = 0;
+    strategy.reset_healthy_progress(crate::now_ms(), "workflow_or_inventory_changed");
+    strategy.recovery_progress.anchor = None;
+    strategy.recovery_progress.observed_ms = 0;
+    clear_breakout_streaks(strategy);
+}
+/// 重启和读重试只冻结健康小时；完成账户对账和新行情核对后决定是否保留。
+pub fn prepare_observation_revalidation(strategy: &mut Strategy) {
+    strategy.freeze_recovery_progress();
+    clear_breakout_streaks(strategy);
+}
+fn clear_breakout_streaks(strategy: &mut Strategy) {
     for layer in strategy.layers.values_mut() {
         layer.outside_count = 0;
         layer.outside_side = 0;

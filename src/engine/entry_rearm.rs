@@ -172,10 +172,10 @@ pub fn evaluate(
     frame: &MarketFrame,
 ) -> Result<Decision> {
     let Some(mut permit) = read(store, c)? else {
-        return Ok(strategy.evaluate(&c.strategy, frame));
+        return Ok(strategy.evaluate_with_continuity(&c.strategy, frame));
     };
     if permit.status != Status::Armed {
-        return Ok(strategy.evaluate(&c.strategy, frame));
+        return Ok(strategy.evaluate_with_continuity(&c.strategy, frame));
     }
     ensure!(
         c.mode == Mode::Live,
@@ -189,13 +189,13 @@ pub fn evaluate(
             "entry_rearm_canceled",
             json!({"permit":permit,"reason":"phase changed or inventory no longer flat"}),
         )?;
-        return Ok(strategy.evaluate(&c.strategy, frame));
+        return Ok(strategy.evaluate_with_continuity(&c.strategy, frame));
     }
     settled(store)?;
     let mut trial = strategy.clone();
     let history = trial.entry_history.clone();
     trial.entry_history = EntryHistory::Initial;
-    let mut decision = trial.evaluate(&c.strategy, frame);
+    let mut decision = trial.evaluate_with_continuity(&c.strategy, frame);
     trial.entry_history = history; // 历史不是「从未建仓」；只豁免这一次的等待。
     *strategy = trial;
     if matches!(decision.lp, LpIntent::Deploy { .. }) {

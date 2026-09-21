@@ -661,7 +661,7 @@ async fn main() -> Result<()> {
                     candles: candles[..=i].to_vec(),
                     portfolio: paper.portfolio.clone(),
                 };
-                let d = strategy.evaluate(&c.strategy, &frame);
+                let d = strategy.evaluate_with_continuity(&c.strategy, &frame);
                 paper.apply(&d, &c, bar.close, bar.close, now)?;
                 curve.push(json!({"time_ms":now,"price":bar.close,"equity":paper.portfolio.equity(bar.close),"decision":d,"short_base":paper.portfolio.short_base}));
             }

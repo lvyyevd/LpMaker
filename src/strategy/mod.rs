@@ -1,4 +1,5 @@
 pub mod indicators;
+pub mod progress;
 use crate::{
     config::StrategyConfig,
     domain::{Decision, LpIntent, MarketFrame},
@@ -42,6 +43,9 @@ pub struct Strategy {
     pub last_scale: u64,
     pub last_decision_bar: u64,
     pub layers: BTreeMap<String, LayerState>,
+    /// 新版 EVM 恢复证据；旧检查点缺失此字段时按默认值安全迁移。
+    #[serde(default)]
+    pub recovery_progress: progress::Progress,
 }
 impl Default for Strategy {
     fn default() -> Self {
@@ -56,6 +60,7 @@ impl Default for Strategy {
             last_scale: 0,
             last_decision_bar: 0,
             layers: BTreeMap::new(),
+            recovery_progress: Default::default(),
         }
     }
 }
@@ -66,6 +71,18 @@ impl Strategy {
         }
     }
     pub fn evaluate(&mut self, c: &StrategyConfig, f: &MarketFrame) -> Decision {
+        self.evaluate_inner(c, f, false)
+    }
+    /// EVM 运行器启用短暂观察中断的进度核对；既有 Solana 策略使用原入口。
+    pub fn evaluate_with_continuity(&mut self, c: &StrategyConfig, f: &MarketFrame) -> Decision {
+        self.evaluate_inner(c, f, true)
+    }
+    fn evaluate_inner(
+        &mut self,
+        c: &StrategyConfig,
+        f: &MarketFrame,
+        continuity: bool,
+    ) -> Decision {
         self.observe_lp(!f.portfolio.positions.is_empty());
         if self.phase == Phase::Warmup
             && self.entry_history != EntryHistory::Initial
@@ -96,11 +113,16 @@ impl Strategy {
             && p > 0.0
             && f.hedge_price > 0.0;
         if stale || !valid {
-            if self.phase != Phase::Halted {
-                self.phase = Phase::Paused;
-                self.pause_since = f.now_ms;
+            if continuity {
+                // 数据不可用不能证明市场恶化。冻结进度且不操作，避免重置风险冷却。
+                self.freeze_recovery_progress();
+            } else {
+                if self.phase != Phase::Halted {
+                    self.phase = Phase::Paused;
+                    self.pause_since = f.now_ms;
+                }
+                self.healthy_hours = 0;
             }
-            self.healthy_hours = 0;
             d.state = format!("{:?}", self.phase);
             d.reasons
                 .push("stale_or_invalid_data: no transactions using uncertain prices".into());
@@ -122,6 +144,9 @@ impl Strategy {
         let metrics = match indicators::calculate(&f.candles, c, f.now_ms) {
             Ok(m) => m,
             Err(e) => {
+                if continuity {
+                    self.freeze_recovery_progress();
+                }
                 d.reasons.push(format!("indicator_warmup_or_gap: {e}"));
                 d.target_short_base = f.portfolio.base();
                 d.emergency = !f.portfolio.positions.is_empty();
@@ -145,12 +170,29 @@ impl Strategy {
             d.reasons.push("pool_perp_basis_limit".into());
         }
         let unsafe_market = fast || shock || metrics.downtrend || basis > c.max_basis_bps;
+        let recovery_blockers = progress::blockers(c, f, &metrics, &d.reasons);
+        let healthy = recovery_blockers.is_empty();
+        let mut counter_event = if continuity && !unsafe_market {
+            self.recheck_progress(f, &metrics, &recovery_blockers, &mut d.reasons)
+        } else {
+            "unchanged"
+        };
         if unsafe_market {
             if self.phase != Phase::Paused {
                 self.pause_since = f.now_ms;
             }
             self.phase = Phase::Paused;
-            self.healthy_hours = 0;
+            if continuity {
+                self.recovery_progress.pending_revalidation = false;
+                let reason = recovery_blockers
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or("hour_not_healthy");
+                self.reset_healthy_progress(f.now_ms, reason);
+                counter_event = "reset_market_risk";
+            } else {
+                self.healthy_hours = 0;
+            }
             self.fraction = 0.0;
             for v in self.layers.values_mut() {
                 v.outside_count = 0;
@@ -160,24 +202,36 @@ impl Strategy {
         let new_hour = metrics.last_close_ms > self.last_hour;
         if new_hour {
             if self.last_hour > 0 && metrics.last_close_ms - self.last_hour > 3_600_000 {
-                self.healthy_hours = 0;
+                if continuity {
+                    self.reset_healthy_progress(f.now_ms, "hourly_gap");
+                } else {
+                    self.healthy_hours = 0;
+                }
             }
             self.last_hour = metrics.last_close_ms;
-            let healthy = !unsafe_market
-                && metrics.vol_ratio < c.vol_resume_ratio
-                && metrics.no_new_low
-                && p >= metrics.ema_fast;
             if healthy {
-                self.healthy_hours += 1;
+                self.healthy_hours = self.healthy_hours.saturating_add(1);
+                counter_event = "hour_counted";
             } else {
-                self.healthy_hours = 0;
+                if continuity && !unsafe_market {
+                    self.reset_healthy_progress(f.now_ms, "hour_not_healthy");
+                } else {
+                    self.healthy_hours = 0;
+                }
             }
+        }
+        if continuity {
+            if counter_event == "unchanged" {
+                counter_event = "waiting_next_hour";
+            }
+            self.report_progress(c, f, &metrics, recovery_blockers, counter_event);
         }
         if self.phase == Phase::Paused {
             // First entry uses the current-market gates above, as a fresh Warmup does.
             // Stale data, drawdown, downtrend and volatility protection remain mandatory.
             let initial_entry = self.entry_history == EntryHistory::Initial && !unsafe_market;
             let can_resume = !unsafe_market
+                && (!continuity || healthy)
                 && self.healthy_hours >= c.resume_healthy_hours
                 && f.now_ms.saturating_sub(self.pause_since) >= c.cooldown_hours * 3_600_000;
             if initial_entry {
@@ -217,6 +271,7 @@ impl Strategy {
                     .push("initial_entry: current-market checks passed".into());
             }
         } else if self.phase == Phase::Recovering
+            && (!continuity || healthy)
             && self.healthy_hours >= c.resume_healthy_hours
             && f.now_ms.saturating_sub(self.last_scale) >= c.recovery_step_hours * 3_600_000
         {
