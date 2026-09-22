@@ -25,10 +25,10 @@ emergency_slippage_bps = 30
 [liquidity]
 kind = "uniswap_v3"
 chain_id = 4663
-rpc_url = "https://soft-fabled-patina.robinhood-mainnet.quiknode.pro/e64d68bda6fb3806266ebb4d9426da61bb5ab90a/"
+rpc_url = "https://robinhood-rpc.publicnode.com/52f60211bf320bbb41c2bef258f98d63233032bf3109d0ee8291c685524aec54"
 # History only: PublicNode free eth_getLogs may require a personal token.
-archive_rpc_url = "https://soft-fabled-patina.robinhood-mainnet.quiknode.pro/e64d68bda6fb3806266ebb4d9426da61bb5ab90a/"
-ws_url = "wss://soft-fabled-patina.robinhood-mainnet.quiknode.pro/e64d68bda6fb3806266ebb4d9426da61bb5ab90a/"
+archive_rpc_url = "https://robinhood-rpc.publicnode.com/52f60211bf320bbb41c2bef258f98d63233032bf3109d0ee8291c685524aec54"
+ws_url = "wss://robinhood-rpc.publicnode.com/52f60211bf320bbb41c2bef258f98d63233032bf3109d0ee8291c685524aec54"
 # Optional public LP address for read-only monitoring; no private key needed.
 # owner = "0x..."
 nonce_refresh_seconds = 30
