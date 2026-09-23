@@ -547,7 +547,10 @@ fn archive_and_clear(store: &Store, root: &Path) -> Result<PathBuf> {
     fs::File::open(parent)?.sync_all()?;
     for item in fs::read_dir(&root)? {
         let item = item?;
-        if item.file_name() == "process.lock" || item.file_name() == MARKER {
+        if item.file_name() == "process.lock"
+            || item.file_name() == MARKER
+            || item.file_name() == super::migration::MARKER
+        {
             continue;
         }
         if item.file_type()?.is_dir() {
@@ -705,6 +708,25 @@ mod tests {
         assert!(Store::open(&root).is_err());
         drop(s);
         assert!(Store::open(root).is_ok());
+    }
+    #[tokio::test]
+    async fn config_migration_guard_survives_reset_and_is_also_archived() {
+        let (dir, s) = setup();
+        let guard = json!({"schema":1,"profile":"in_progress"});
+        s.write(super::super::migration::MARKER, &guard).unwrap();
+        let a = Fake {
+            calls: Mutex::default(),
+            failure: None,
+            flat: true,
+        };
+        flatten(&a, &s).await.unwrap();
+        let backup = archive_and_clear(&s, &dir.path().join("state")).unwrap();
+        assert_eq!(
+            s.read::<Value>(super::super::migration::MARKER).unwrap(),
+            Some(guard)
+        );
+        assert!(backup.join(super::super::migration::MARKER).is_file());
+        assert_eq!(fs::read_dir(dir.path().join("state")).unwrap().count(), 2);
     }
     #[test]
     fn flat_proof_rejects_unproven_dust_pending_orders_and_unclaimed_lp() {

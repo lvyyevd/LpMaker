@@ -216,6 +216,9 @@ impl Default for LoggingConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct StrategyConfig {
+    /// 显式选择 ETH 长持 LP 策略；缺省时保留旧策略和配置指纹。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eth_persistent: Option<crate::strategy::eth::PersistentConfig>,
     pub total_capital: f64,
     pub lp_budget: f64,
     pub hedge_collateral: f64,
@@ -389,7 +392,7 @@ impl Config {
                     && x.weight > 0.0
                     && x.half_width.is_finite()
                     && x.half_width > 0.001
-                    && x.half_width < 1.0),
+                    && (x.half_width < 1.0 || (s.eth_persistent.is_some() && x.half_width <= 9.0))),
             "invalid layers"
         );
         ensure!(
@@ -405,6 +408,9 @@ impl Config {
             self.hyperliquid.leverage > 0 && self.hyperliquid.leverage <= 3,
             "strategy leverage capped at 3x"
         );
+        if let Some(profile) = &s.eth_persistent {
+            profile.validate(self)?;
+        }
         ensure!(
             self.hyperliquid.maker_wait_seconds > 0,
             "maker wait must be positive"

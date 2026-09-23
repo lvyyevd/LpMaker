@@ -11,6 +11,9 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 pub fn inventory_hedge_target(c: &crate::config::StrategyConfig, p: &Portfolio, price: f64) -> f64 {
+    if c.eth_persistent.is_some() {
+        return p.base() * c.inside_hedge_ratio;
+    }
     p.wallet_base
         + p.positions
             .iter()
@@ -48,7 +51,9 @@ impl Live {
             "entry basis limit"
         );
         let c = &self.cfg.strategy;
-        let count = (c.vol_long_hours + c.vol_short_hours + 2).max(c.ema_slow_hours * 3 + 2);
+        let count = (c.vol_long_hours + c.vol_short_hours + 2)
+            .max(c.ema_slow_hours * 3 + 2)
+            .max(if c.eth_persistent.is_some() { 74 } else { 0 });
         let bars = self
             .hl
             .candles(
@@ -62,6 +67,14 @@ impl Live {
         crate::runtime::fresh(started, now, self.cfg.runtime.observation_timeout_seconds)?;
         crate::runtime::fresh(s.time_ms, now, c.max_data_age_seconds)?;
         crate::runtime::fresh(t, now, c.max_data_age_seconds)?;
+        if let Some(profile) = &c.eth_persistent {
+            let f = crate::strategy::eth::latest_feature(&bars, now)?;
+            ensure!(
+                profile.guard(c).danger(&f, s.price).is_none(),
+                "persistent LP market became unsafe during workflow; preserve hedge and reconcile"
+            );
+            return Ok(());
+        }
         let m = crate::strategy::indicators::calculate(&bars, c, now)?;
         ensure!(
             !m.downtrend

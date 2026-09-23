@@ -26,7 +26,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Validate local config without network or keys.
-    Check,
+    Check {
+        /// Print only the validated state directory, for operator scripts.
+        #[arg(long)]
+        state_dir: bool,
+    },
     /// Read-only native WS monitoring with Chinese status reports every 60s by default.
     Monitor {
         #[arg(long, default_value_t = 0)]
@@ -84,6 +88,12 @@ enum Command {
     },
     /// Exit this pool, sell base, cancel/close the configured hedge, then archive and reset state.
     ResetFlat {
+        #[arg(long)]
+        execute: bool,
+    },
+    /// Preview, or flatten/reset and install the Robinhood ETH persistent 200U profile.
+    SwitchRobinhoodDd5 {
+        /// Actually flatten both venues, archive state, then atomically update --config.
         #[arg(long)]
         execute: bool,
     },
@@ -267,9 +277,13 @@ fn live(c: &Config, execute: bool) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let c = Config::load(cli.config)?;
+    let c = Config::load(&cli.config)?;
     let _logging = lp_maker::logging::init(&c.logging)?;
-    if matches!(cli.command, Command::Check) {
+    if let Command::Check { state_dir } = &cli.command {
+        if *state_dir {
+            println!("{}", c.state_dir);
+            return Ok(());
+        }
         return print(
             json!({"status":"valid","mode":c.mode,"chain_id":c.liquidity.chain_id,"pool":c.liquidity.pool}),
         );
@@ -278,6 +292,7 @@ async fn main() -> Result<()> {
     let read_only = matches!(
         &cli.command,
         Command::Status
+            | Command::SwitchRobinhoodDd5 { execute: false }
             | Command::Health { .. }
             | Command::Monitor { .. }
             | Command::Info { .. }
@@ -294,7 +309,7 @@ async fn main() -> Result<()> {
     });
     let mut hl = Client::new(c.hyperliquid.clone(), store.clone())?;
     match cli.command {
-        Command::Check => unreachable!(),
+        Command::Check { .. } => unreachable!(),
         Command::Health { max_age_seconds } => print(lp_maker::runtime::check_health(&store, max_age_seconds)?),
         Command::Monitor { seconds } => lp_maker::monitor::standalone(c, store, seconds).await,
         Command::Run { once, execute, first_entry } => engine::run(c, store, once, execute, first_entry).await,
@@ -316,6 +331,7 @@ async fn main() -> Result<()> {
         Command::Reconcile => print(engine::reconcile(&c, store).await?),
         Command::RearmEntry { execute } => print(engine::entry_rearm::request(c, store, execute).await?),
         Command::ResetFlat { execute } => print(engine::reset::request(c, store, execute).await?),
+        Command::SwitchRobinhoodDd5 { execute } => print(engine::migration::request(&cli.config, c, store, execute).await?),
         Command::Info { command } => {
             let result = match command {
                 InfoCommand::Assets => serde_json::to_value(hl.assets().await?)?,

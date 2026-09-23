@@ -6,6 +6,8 @@
 /adapters/solana/node_modules/
 .env.*
 /config/solana.local.toml
+# Atomic config handoff files may survive a killed migration process.
+/config/.lp-maker-switch-*.toml
 
 # Solana historical data and generated backtest artifacts stay local.
 /backtests/solana/

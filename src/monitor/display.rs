@@ -140,6 +140,26 @@ pub fn robinhood(report: &Value) -> String {
 }
 
 fn recovery_lines(lines: &mut Vec<String>, strategy: &Value, report: &Value) {
+    if let Some(r) = strategy["eth_persistent"]["report"].as_object() {
+        let r = Value::Object(r.clone());
+        lines.push(format!(
+            "ETH 长持 LP 风控（上次观察）：健康小时 {}/{}｜冷却剩余 {} 秒｜观察：{}",
+            n(&r["healthy_hours"], 0),
+            n(&r["required_hours"], 0),
+            n(&r["cooldown_remaining_seconds"], 0),
+            observed_age(&r["observed_ms"], report)
+        ));
+        let pct = |key: &str| n(&serde_json::json!(number(&r[key]).map(|x| x * 100.0)), 3);
+        lines.push(format!(
+            "  已完成小时收益：1h {}%｜24h {}%｜72h {}%｜近6小时波动率 {}%（暂停阈值 {}%）",
+            pct("return_1h"),
+            pct("return_24h"),
+            pct("return_72h"),
+            pct("vol_6h"),
+            pct("pause_vol")
+        ));
+        return;
+    }
     use crate::strategy::progress::reason_zh;
     let progress = &strategy["recovery_progress"];
     let r = &progress["report"];

@@ -140,6 +140,15 @@ EVM nonce 按钱包和链持久化，每 30 秒刷新 `latest/pending`；每次�
 
 ## 扩展结构
 
+新增可选的 [ETH 长持 LP / 5% 回撤退出策略](docs/eth-persistent-dd5.md)，使用
+`config/eth-persistent-dd5-paper.toml` 和独立状态目录。默认模拟，保留旧 EVM/Solana
+策略入口；40% APR 仅用于离线研究，实时 paper 不伪造手续费收入。
+
+Robinhood 的 `config/local.toml` 已选用200U新策略；旧实盘首次切换在服务器执行
+`bash scripts/switch-robinhood-dd5.sh`。该命令按保存的旧参数真实平掉本池LP/ETH对冲，
+确认空仓后归档并清空活动状态、安装新配置并后台启动。失败保留交易和迁移记录，
+不会跳过未决交易。它不是普通重启命令，详见上述策略文档。
+
 ```text
 src/domain.rs           平台无关的行情、LP、仓位、决策及能力接口
 src/strategy/           纯策略与指标；不访问网络、不签名

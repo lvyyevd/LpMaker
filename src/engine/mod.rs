@@ -1,6 +1,7 @@
 //! 运行入口与恢复循环。保持原检查点字段、配置指纹和交易顺序，重启沿用旧状态。
 pub mod entry_rearm;
 mod live;
+pub mod migration;
 mod paper;
 pub mod reset;
 use crate::{
@@ -26,6 +27,10 @@ pub async fn run(
     execute: bool,
     first_entry: bool,
 ) -> Result<()> {
+    ensure!(
+        store.read::<Value>(migration::MARKER)?.is_none(),
+        "策略迁移尚未完成；保留记录，重新执行 switch-robinhood-dd5 --execute，勿直接运行策略"
+    );
     ensure!(
         store.read::<Value>("manual_reset.json")?.is_none(),
         "手工退出/清理尚未完成；保留记录，重新执行 reset-flat --execute，勿直接运行策略"
@@ -232,7 +237,12 @@ async fn run_strategy(
             crate::runtime::observe(c.runtime.observation_timeout_seconds, async {
                 if history.is_empty() || hour != fetched_hour {
                     let count = (c.strategy.vol_long_hours + c.strategy.vol_short_hours + 2)
-                        .max(c.strategy.ema_slow_hours * 3 + 2);
+                        .max(c.strategy.ema_slow_hours * 3 + 2)
+                        .max(if c.strategy.eth_persistent.is_some() {
+                            74
+                        } else {
+                            0
+                        });
                     history = hl
                         .candles(
                             &c.hyperliquid.hedge_coin,

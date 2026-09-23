@@ -1,3 +1,4 @@
+pub mod eth;
 pub mod indicators;
 pub mod progress;
 use crate::{
@@ -32,6 +33,9 @@ pub struct LayerState {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Strategy {
+    /// 新策略独立的运行时钟；旧检查点缺少该字段时不改变原有恢复逻辑。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eth_persistent: Option<eth::PersistentState>,
     #[serde(default)]
     pub entry_history: EntryHistory,
     pub phase: Phase,
@@ -50,6 +54,7 @@ pub struct Strategy {
 impl Default for Strategy {
     fn default() -> Self {
         Self {
+            eth_persistent: None,
             entry_history: EntryHistory::Initial,
             phase: Phase::Warmup,
             peak_equity: 0.0,
@@ -75,6 +80,9 @@ impl Strategy {
     }
     /// EVM 运行器启用短暂观察中断的进度核对；既有 Solana 策略使用原入口。
     pub fn evaluate_with_continuity(&mut self, c: &StrategyConfig, f: &MarketFrame) -> Decision {
+        if c.eth_persistent.is_some() {
+            return eth::evaluate(self, c, f);
+        }
         self.evaluate_inner(c, f, true)
     }
     fn evaluate_inner(
