@@ -5,9 +5,23 @@ set -euo pipefail
 umask 077
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 [ "$(uname -s)" = Linux ] || { echo "本脚本用于 Linux 线上服务器"; exit 1; }
+. scripts/lib/background.sh
 lp_config=config/local.toml
 lp_bin=./target/release/lp-maker
 mkdir -p data/operator-logs
+
+# 整个编译/平仓/迁移任务也要后台化，而非只在最后把策略加上 &。
+# --worker 仅供本脚本内部启动；入口立即返回，进度写入独立日志。
+if [ "$#" -eq 0 ]; then
+  lp_switch_log=$(mktemp "$PWD/data/operator-logs/switch-robinhood-dd5-task.log.XXXXXXXX")
+  lp_start_background "$lp_switch_log" bash "$PWD/scripts/switch-robinhood-dd5.sh" --worker
+  echo "已提交后台切换任务，PID：${LP_BACKGROUND_PID}；此时尚未确认平仓或建仓完成。"
+  echo "编译、平仓和启动进度：$lp_switch_log"
+  printf '查看进度：tail -f %q\n' "$lp_switch_log"
+  echo "Ctrl+C 只停止查看日志；后台任务会继续。完成前不要重复执行切换命令。"
+  exit 0
+fi
+[ "$#" -eq 1 ] && [ "$1" = --worker ] || { echo "不支持的参数" >&2; exit 1; }
 exec 8>data/exit-reset.lock
 flock -n 8 || { echo "已有退出/切换脚本运行，已取消重复执行"; exit 1; }
 trap 'echo "切换未完成：已停止后续步骤。保留了交易记录和备份，请检查上方错误；不要手动删除状态。" >&2' ERR
@@ -59,9 +73,8 @@ if [ -f run.log ]; then
   lp_old_log=$(mktemp "$PWD/data/operator-logs/run-before-switch.log.XXXXXXXX")
   mv -- run.log "$lp_old_log"
 fi
-nohup "$lp_bin" --config "$lp_config" run --execute \
-  8>&- </dev/null >run.log 2>&1 &
-lp_new_pid=$!
+lp_start_background "$PWD/run.log" "$lp_bin" --config "$lp_config" run --execute
+lp_new_pid=$LP_BACKGROUND_PID
 echo "新策略启动 PID：${lp_new_pid}；日志：$PWD/run.log"
 
 # PID 存在不等于对账成功，等到至少完成一次策略决策才报告健康。

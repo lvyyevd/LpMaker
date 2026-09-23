@@ -148,6 +148,8 @@ Robinhood 的 `config/local.toml` 已选用200U新策略；旧实盘首次切换
 `bash scripts/switch-robinhood-dd5.sh`。该命令按保存的旧参数真实平掉本池LP/ETH对冲，
 确认空仓后归档并清空活动状态、安装新配置并后台启动。失败保留交易和迁移记录，
 不会跳过未决交易。它不是普通重启命令，详见上述策略文档。
+切换全流程在独立后台会话运行，入口返回任务 PID 和进度日志；Ctrl+C 退出日志查看不会中断任务。
+已经完成切换后，只恢复运行使用 `bash scripts/start-background.sh`，保留原仓位和状态、追加 `run.log`。
 
 ```text
 src/domain.rs           平台无关的行情、LP、仓位、决策及能力接口
