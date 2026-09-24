@@ -105,6 +105,25 @@ impl Paper {
         });
     }
     pub fn apply(&mut self, d: &Decision, c: &Config, p: f64, hedge: f64, now: u64) -> Result<()> {
+        self.apply_with_widths(d, c, p, hedge, now, None)
+    }
+    pub fn apply_with_widths(
+        &mut self,
+        d: &Decision,
+        c: &Config,
+        p: f64,
+        hedge: f64,
+        now: u64,
+        widths: Option<(f64, f64)>,
+    ) -> Result<()> {
+        if crate::strategy::eth::band::config(&c.strategy).is_some()
+            && matches!(d.lp, LpIntent::Deploy { .. } | LpIntent::Recenter { .. })
+        {
+            ensure!(
+                widths.is_some(),
+                "band paper entry requires observed hourly feature"
+            );
+        }
         match &d.lp {
             LpIntent::Hold => {}
             LpIntent::ExitToQuote => {
@@ -177,7 +196,13 @@ impl Paper {
                     .sum::<f64>();
                 let budget = match d.lp {
                     LpIntent::Deploy { fraction } => c.strategy.lp_budget * fraction,
-                    _ => available,
+                    _ => {
+                        if widths.is_some() {
+                            c.strategy.lp_budget
+                        } else {
+                            available
+                        }
+                    }
                 }
                 .min(available)
                     * 0.995;
@@ -188,7 +213,11 @@ impl Paper {
                     .filter(|l| layers.contains(&l.name))
                 {
                     let value = budget * l.weight / weight_sum;
-                    let (lo, hi) = math::range(p, l.half_width);
+                    let (lo, hi) = if let Some(w) = widths {
+                        (p * (1. - w.0), p * (1. + w.1))
+                    } else {
+                        math::range(p, l.half_width)
+                    };
                     let liquidity = math::liquidity_for_value(value, lo, hi, p)?;
                     let (b, q) = math::amounts(liquidity, lo, hi, p);
                     self.swap_to_base(b, p, c);
@@ -226,14 +255,23 @@ impl Paper {
             self.pending = None;
         }
         let diff = target - self.portfolio.short_base;
-        if diff.abs() * hedge >= c.strategy.hedge_deadband_usd && self.pending.is_none() {
+        let entry_band =
+            widths.is_some() && matches!(d.lp, LpIntent::Deploy { .. } | LpIntent::Recenter { .. });
+        let minimum = if entry_band {
+            10.
+        } else {
+            c.strategy.hedge_deadband_usd
+        };
+        if diff.abs() * hedge >= minimum && self.pending.is_none() {
             let buy = diff < 0.0;
             self.pending = Some(PaperOrder {
                 target,
                 buy,
                 price: hedge * (if buy { 0.9999 } else { 1.0001 }),
                 submitted: now,
-                emergency: d.emergency || self.portfolio.positions.iter().any(|pos| p < pos.lower),
+                emergency: d.emergency
+                    || entry_band
+                    || self.portfolio.positions.iter().any(|pos| p < pos.lower),
             });
         }
         Ok(())

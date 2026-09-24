@@ -158,6 +158,13 @@ fn recovery_lines(lines: &mut Vec<String>, strategy: &Value, report: &Value) {
             pct("vol_6h"),
             pct("pause_vol")
         ));
+        let band = &strategy["eth_persistent"]["band"];
+        if band.is_object() {
+            lines.push(format!("  单区间净敞口策略｜净ETH敞口 {} U｜本轮风控净值 {} U｜历史风控峰值 {} U｜全局暂停阈值 {}%",
+                n(&band["net_exposure_usd"],4),n(&band["risk_equity"],4),n(&strategy["peak_equity"],4),
+                n(&serde_json::json!(number(&band["pause_threshold"]).map(|v|v*100.)),2)));
+            lines.push("  风控净值=200U起始预算+首次观察后的账户净值变化；未校正出入金、未扣原生Gas，不是完整净利润。".into());
+        }
         return;
     }
     use crate::strategy::progress::reason_zh;
@@ -351,6 +358,7 @@ pub fn liquidity(report: &Value) -> String {
                 let name = match layer {
                     "core" => "主区间",
                     "satellite" => "辅助区间",
+                    "band" => "单区间",
                     _ => layer,
                 };
                 let state = match pos["price_position"]["status"].as_str() {
@@ -364,10 +372,17 @@ pub fn liquidity(report: &Value) -> String {
                     Some(false) => "未触发",
                     None => "待确认",
                 };
-                lines.push(format!(
-                    "  {name}｜NFT {}｜{state}｜下沿保护信号：{protected}",
-                    text(&pos["token_id"])
-                ));
+                if strategy["eth_persistent"]["band"].is_object() {
+                    lines.push(format!(
+                        "  {name}｜NFT {}｜{state}｜对冲依据：净ETH敞口",
+                        text(&pos["token_id"])
+                    ));
+                } else {
+                    lines.push(format!(
+                        "  {name}｜NFT {}｜{state}｜下沿保护信号：{protected}",
+                        text(&pos["token_id"])
+                    ));
+                }
                 lines.push(format!(
                     "    区间：{} ～ {} {quote}｜价格位置：{}%（下沿 0%，上沿 100%）",
                     n(&pos["lower"], 2),

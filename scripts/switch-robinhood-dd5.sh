@@ -6,6 +6,11 @@ umask 077
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 [ "$(uname -s)" = Linux ] || { echo "本脚本用于 Linux 线上服务器"; exit 1; }
 . scripts/lib/background.sh
+case "${LPMAKER_SWITCH_PROFILE:-dd5}" in
+  dd5) lp_switch_command=switch-robinhood-dd5 ;;
+  band) lp_switch_command=switch-robinhood-band ;;
+  *) echo "未知切换策略" >&2; exit 1 ;;
+esac
 lp_config=config/local.toml
 lp_bin=./target/release/lp-maker
 mkdir -p data/operator-logs
@@ -13,7 +18,7 @@ mkdir -p data/operator-logs
 # 整个编译/平仓/迁移任务也要后台化，而非只在最后把策略加上 &。
 # --worker 仅供本脚本内部启动；入口立即返回，进度写入独立日志。
 if [ "$#" -eq 0 ]; then
-  lp_switch_log=$(mktemp "$PWD/data/operator-logs/switch-robinhood-dd5-task.log.XXXXXXXX")
+  lp_switch_log=$(mktemp "$PWD/data/operator-logs/${lp_switch_command}-task.log.XXXXXXXX")
   lp_start_background "$lp_switch_log" bash "$PWD/scripts/switch-robinhood-dd5.sh" --worker
   echo "已提交后台切换任务，PID：${LP_BACKGROUND_PID}；此时尚未确认平仓或建仓完成。"
   echo "编译、平仓和启动进度：$lp_switch_log"
@@ -28,7 +33,7 @@ trap 'echo "切换未完成：已停止后续步骤。保留了交易记录和�
 
 # 编译及只读预检失败时，不停止当前正常运行的策略。
 cargo build --release --locked --bin lp-maker
-"$lp_bin" --config "$lp_config" switch-robinhood-dd5
+"$lp_bin" --config "$lp_config" "$lp_switch_command"
 lp_state=$("$lp_bin" --config "$lp_config" check --state-dir)
 lp_config_absolute=$(readlink -f "$lp_config")
 set -a
@@ -65,9 +70,9 @@ mkdir -p "$lp_state"
 # 不删除 process.lock；换掉锁文件会破坏单实例保护。
 flock -w 60 "$lp_state/process.lock" true
 
-lp_exit_log=$(mktemp "$PWD/data/operator-logs/switch-robinhood-dd5.log.XXXXXXXX")
+lp_exit_log=$(mktemp "$PWD/data/operator-logs/${lp_switch_command}.log.XXXXXXXX")
 echo "开始真实平仓与切换，详细日志：$lp_exit_log"
-"$lp_bin" --config "$lp_config" switch-robinhood-dd5 --execute 2>&1 | tee "$lp_exit_log"
+"$lp_bin" --config "$lp_config" "$lp_switch_command" --execute 2>&1 | tee "$lp_exit_log"
 
 if [ -f run.log ]; then
   lp_old_log=$(mktemp "$PWD/data/operator-logs/run-before-switch.log.XXXXXXXX")

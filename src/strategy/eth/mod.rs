@@ -1,6 +1,7 @@
 //! ETH 长持 LP：按真实 ETH 库存做部分对冲，严重下跌/高波动退出。
 //! 只输出意图；RPC、签名、nonce、成交确认仍由既有执行器负责。
 //! 此模块不用于 Solana，也不把假设的 40% APR 写成实盘收入。
+pub mod band;
 use super::{EntryHistory, Phase, Strategy};
 use crate::{
     config::{Config, StrategyConfig},
@@ -13,6 +14,8 @@ const HOUR: u64 = 3_600_000;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistentConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub band: Option<band::BandConfig>,
     pub drop_24h: f64,
     pub drop_72h: f64,
     /// 最近 6 根已完成小时对数收益的总体标准差，不是年化波动率。
@@ -47,6 +50,9 @@ impl PersistentConfig {
                 && (1..=168).contains(&s.cooldown_hours),
             "invalid persistent ETH risk parameters"
         );
+        if let Some(band) = &self.band {
+            band.validate(c)?;
+        }
         Ok(())
     }
     pub fn guard(&self, c: &StrategyConfig) -> Guard {
@@ -62,6 +68,8 @@ impl PersistentConfig {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PersistentState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub band: Option<band::BandState>,
     pub last_observed_ms: u64,
     pub last_hedge_check_ms: u64,
     /// Maker 未成交时保留目标，下一轮继续核对真实仓位，不假定已经成交。
@@ -195,6 +203,11 @@ pub fn evaluate(s: &mut Strategy, c: &StrategyConfig, f: &MarketFrame) -> Decisi
                 && f.now_ms - f.pool.time_ms <= c.max_data_age_seconds * 1000
                 && f.now_ms - f.hedge_time_ms <= c.max_data_age_seconds * 1000
             {
+                let equity = if band::config(c).is_some() {
+                    band::managed_equity(s, c, equity)
+                } else {
+                    equity
+                };
                 s.peak_equity = s.peak_equity.max(equity).max(c.total_capital);
                 if s.phase == Phase::Halted || equity <= s.peak_equity * (1. - c.max_drawdown) {
                     s.phase = Phase::Halted;
@@ -250,6 +263,9 @@ pub fn evaluate_feature(
         d.reasons
             .push("stale_or_invalid_data: persistent observation unavailable".into());
         return d;
+    }
+    if cfg.band.is_some() {
+        return band::evaluate(s, c, f, x);
     }
     s.observe_lp(!f.portfolio.positions.is_empty());
     let st = s.eth_persistent.get_or_insert_with(Default::default);

@@ -14,7 +14,7 @@ cargo build --release --locked && ./target/release/lp-maker --config config/eth-
 
 ## 从旧 Robinhood 实盘切换
 
-本次 `config/local.toml` 已选用新策略。代码同步到 Linux 服务器后，在项目根目录执行：
+此文档描述旧宽区间版本；当前 `config/local.toml` 已改选单区间净敞口候选，切换请参阅 [eth-band.md](eth-band.md)。旧宽区间切换命令仍保留。代码同步到 Linux 服务器后，在项目根目录执行：
 
 ```sh
 bash scripts/switch-robinhood-dd5.sh

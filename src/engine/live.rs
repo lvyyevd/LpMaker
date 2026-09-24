@@ -11,6 +11,9 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 pub fn inventory_hedge_target(c: &crate::config::StrategyConfig, p: &Portfolio, price: f64) -> f64 {
+    if let Some(band) = crate::strategy::eth::band::config(c) {
+        return band.target(p, price);
+    }
     if c.eth_persistent.is_some() {
         return p.base() * c.inside_hedge_ratio;
     }
@@ -27,6 +30,15 @@ pub fn inventory_hedge_target(c: &crate::config::StrategyConfig, p: &Portfolio, 
             })
             .sum::<f64>()
 }
+/// 确定的入场风险变化：只在没有未知交易时允许执行器对账退出并进入正常冷却。
+#[derive(Debug)]
+pub(crate) struct BandEntryRisk;
+impl std::fmt::Display for BandEntryRisk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "band entry risk changed during workflow")
+    }
+}
+impl std::error::Error for BandEntryRisk {}
 pub struct Live {
     pub liquidity: Arc<dyn LiquidityExecutor>,
     pub store: Arc<Store>,
@@ -35,14 +47,14 @@ pub struct Live {
 }
 pub(super) use crate::hyperliquid::hedge::HedgeBudgetUnavailable;
 impl Live {
-    async fn entry_guard(&self) -> Result<()> {
+    async fn entry_guard(&self) -> Result<Option<crate::strategy::eth::Feature>> {
         crate::runtime::observe(
             self.cfg.runtime.observation_timeout_seconds,
             self.entry_guard_inner(),
         )
         .await
     }
-    async fn entry_guard_inner(&self) -> Result<()> {
+    async fn entry_guard_inner(&self) -> Result<Option<crate::strategy::eth::Feature>> {
         let started = crate::now_ms();
         let s = self.liquidity.snapshot().await?;
         let (p, t) = self.hl.market(&self.cfg.hyperliquid.hedge_coin).await?;
@@ -69,11 +81,32 @@ impl Live {
         crate::runtime::fresh(t, now, c.max_data_age_seconds)?;
         if let Some(profile) = &c.eth_persistent {
             let f = crate::strategy::eth::latest_feature(&bars, now)?;
+            if profile.band.is_some() {
+                let checkpoint = self
+                    .store
+                    .read::<recovery::Checkpoint>("checkpoint.json")?
+                    .context("band entry requires persisted risk basis")?;
+                let actual = self.portfolio().await?;
+                crate::runtime::fresh(
+                    started,
+                    crate::now_ms(),
+                    self.cfg.runtime.observation_timeout_seconds,
+                )?;
+                if profile.guard(c).danger(&f, s.price).is_some()
+                    || !crate::strategy::eth::band::entry_equity_safe(
+                        &checkpoint.strategy,
+                        c,
+                        actual.equity(s.price),
+                    )
+                {
+                    return Err(BandEntryRisk.into());
+                }
+            }
             ensure!(
                 profile.guard(c).danger(&f, s.price).is_none(),
                 "persistent LP market became unsafe during workflow; preserve hedge and reconcile"
             );
-            return Ok(());
+            return Ok(Some(f));
         }
         let m = crate::strategy::indicators::calculate(&bars, c, now)?;
         ensure!(
@@ -83,7 +116,7 @@ impl Live {
                 && s.price / m.last_close - 1.0 >= -c.fast_drop_1h,
             "market became unsafe during LP workflow; hold hedge and reconcile workflow"
         );
-        Ok(())
+        Ok(None)
     }
     async fn scale_positions(&self, positions: &[LpPosition], fraction: f64) -> Result<()> {
         for pos in positions {
@@ -246,8 +279,14 @@ impl Live {
             "workflow.json",
             &Some(json!({"decision":d,"started_ms":crate::now_ms()})),
         )?;
-        // Inventory is temporarily fully hedged during a multi-venue LP transition.
-        if let Err(error) = self.hedge(portfolio.base(), true).await {
+        let band = crate::strategy::eth::band::config(&self.cfg.strategy);
+        // 新候选复用库存与原空单。旧策略仍保持过渡期全额保护。
+        if band.is_some() {
+            self.sync_orders(true).await?;
+        }
+        if band.is_none()
+            && let Err(error) = self.hedge(portfolio.base(), true).await
+        {
             if d.lp != LpIntent::ExitToQuote
                 || self.store.pending()?.is_some()
                 || !(error.is::<crate::hyperliquid::ExchangeRejected>()
@@ -287,6 +326,12 @@ impl Live {
             .filter(|p| layers.contains(&p.layer))
         {
             self.liquidity.remove_position(p).await?;
+        }
+        if let Some(band) = band
+            && matches!(d.lp, LpIntent::Recenter { .. })
+        {
+            self.store.event("band_roll_wait",json!({"seconds":band.roll_delay_seconds,"note":"旧LP已退出，保留实际库存与空单；重启按workflow对账退出，不重复mint"}))?;
+            tokio::time::sleep(std::time::Duration::from_secs(band.roll_delay_seconds)).await;
         }
         if d.lp == LpIntent::ExitToQuote {
             let (base, _) = self.liquidity.wallet_balances().await?;
@@ -331,13 +376,18 @@ impl Live {
                 .iter()
                 .filter(|l| names.contains(&l.name))
             {
-                self.entry_guard().await?;
+                let feature = self.entry_guard().await?;
+                let widths =
+                    band.map(|b| b.widths(feature.as_ref().expect("validated ETH feature")));
                 let s = self.liquidity.snapshot().await?;
                 let value = budget * l.weight / total_weight;
                 // 让协议适配器处理 tick 对齐所需配比；Robinhood 保留旧等值逻辑。
-                let target_base = self
-                    .liquidity
-                    .mint_base_requirement(value, l.half_width, &s)?;
+                let target_base = if let Some(w) = widths {
+                    self.liquidity.bounded_base_requirement(value, w, &s)?
+                } else {
+                    self.liquidity
+                        .mint_base_requirement(value, l.half_width, &s)?
+                };
                 let (current, _) = self.liquidity.wallet_balances().await?;
                 let delta = target_base - current;
                 if delta.abs() * s.price > 1.0 {
@@ -348,13 +398,27 @@ impl Live {
                         )
                         .await?;
                 }
-                let inventory = self.portfolio().await?;
-                self.hedge(inventory.base(), true).await?;
+                if band.is_none() {
+                    let inventory = self.portfolio().await?;
+                    self.hedge(inventory.base(), true).await?;
+                }
                 self.entry_guard().await?;
                 // 0.2% cushion covers tick rounding and small price movement; excess stays in the wallet.
-                self.liquidity
-                    .mint_layer(&l.name, value * 0.998, l.half_width)
-                    .await?;
+                if let Some(w) = widths {
+                    tracing::info!(
+                        lower_width = w.0,
+                        upper_width = w.1,
+                        budget = value,
+                        "Robinhood 净敞口策略准备单区间建仓"
+                    );
+                    self.liquidity
+                        .mint_bounded_layer(&l.name, value * 0.998, w)
+                        .await?;
+                } else {
+                    self.liquidity
+                        .mint_layer(&l.name, value * 0.998, l.half_width)
+                        .await?;
+                }
             }
             let inventory = self.portfolio().await?;
             let price = self.liquidity.snapshot().await?.price;

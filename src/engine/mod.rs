@@ -29,7 +29,7 @@ pub async fn run(
 ) -> Result<()> {
     ensure!(
         store.read::<Value>(migration::MARKER)?.is_none(),
-        "策略迁移尚未完成；保留记录，重新执行 switch-robinhood-dd5 --execute，勿直接运行策略"
+        "策略迁移尚未完成；保留记录，重新执行该次对应的 switch-robinhood-dd5 或 switch-robinhood-band --execute，勿直接运行策略"
     );
     ensure!(
         store.read::<Value>("manual_reset.json")?.is_none(),
@@ -345,12 +345,32 @@ async fn run_strategy(
                     // Hold 只操作合约对冲，不改变 LP；下一轮继续核对链上库存。
                     strategy.observe_lp(!frame.portfolio.positions.is_empty());
                 } else {
-                    l.apply(&d).await?;
+                    if let Err(error) = l.apply(&d).await {
+                        if !error.is::<live::BandEntryRisk>() || store.pending()?.is_some() {
+                            return Err(error);
+                        }
+                        store.event("band_workflow_risk_exit", format!("{error:#}"))?;
+                        l.apply(&Decision {
+                            state: "Paused".into(),
+                            reasons: vec!["band_workflow_risk_exit".into()],
+                            lp: LpIntent::ExitToQuote,
+                            target_short_base: 0.,
+                            emergency: true,
+                        })
+                        .await?;
+                        recovery::finish_workflow_recovery(&mut strategy);
+                    }
                     l.sync_orders(false).await?;
                     strategy.observe_lp(!l.portfolio().await?.positions.is_empty());
                 }
             } else {
-                paper.apply(&d, &c, frame.pool.price, hp, now)?;
+                let widths = crate::strategy::eth::band::config(&c.strategy)
+                    .map(|band| {
+                        crate::strategy::eth::latest_feature(&frame.candles, now)
+                            .map(|x| band.widths(&x))
+                    })
+                    .transpose()?;
+                paper.apply_with_widths(&d, &c, frame.pool.price, hp, now, widths)?;
                 strategy.observe_lp(!paper.portfolio.positions.is_empty());
                 recovery::save(&store, &c, &strategy, &paper)?;
                 store.event("paper_execution", json!({"decision":d,"portfolio":paper.portfolio,"pending_hedge":paper.pending,"hedge_fees":paper.hedge_fees,"swap_costs":paper.swap_costs}))?;
@@ -380,6 +400,7 @@ pub(crate) fn defer_entry(
     strategy.phase = previous.phase.clone();
     strategy.fraction = previous.fraction;
     strategy.last_scale = previous.last_scale;
+    strategy.eth_persistent = previous.eth_persistent.clone();
     d.lp = LpIntent::Hold;
     d.state = format!("{:?}", strategy.phase);
     d.target_short_base = portfolio.short_base;

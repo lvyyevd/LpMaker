@@ -97,6 +97,11 @@ enum Command {
         #[arg(long)]
         execute: bool,
     },
+    /// Flatten/reset and install the reviewed Robinhood bounded LP + net-exposure profile.
+    SwitchRobinhoodBand {
+        #[arg(long)]
+        execute: bool,
+    },
     /// Inspect persisted state and unresolved operations; no key required.
     Status,
     /// Fail unless recent completed strategy decisions prove the runner is healthy.
@@ -293,6 +298,7 @@ async fn main() -> Result<()> {
         &cli.command,
         Command::Status
             | Command::SwitchRobinhoodDd5 { execute: false }
+            | Command::SwitchRobinhoodBand { execute: false }
             | Command::Health { .. }
             | Command::Monitor { .. }
             | Command::Info { .. }
@@ -331,6 +337,7 @@ async fn main() -> Result<()> {
         Command::Reconcile => print(engine::reconcile(&c, store).await?),
         Command::RearmEntry { execute } => print(engine::entry_rearm::request(c, store, execute).await?),
         Command::ResetFlat { execute } => print(engine::reset::request(c, store, execute).await?),
+        Command::SwitchRobinhoodBand { execute } => print(engine::migration::request_band(&cli.config, c, store, execute).await?),
         Command::SwitchRobinhoodDd5 { execute } => print(engine::migration::request(&cli.config, c, store, execute).await?),
         Command::Info { command } => {
             let result = match command {

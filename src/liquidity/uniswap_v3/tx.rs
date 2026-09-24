@@ -69,6 +69,18 @@ impl crate::domain::LiquidityExecutor for Executor {
         self.mint(layer, value, width).await?;
         Ok(())
     }
+    fn bounded_base_requirement(
+        &self,
+        value: f64,
+        widths: (f64, f64),
+        snapshot: &crate::domain::PoolSnapshot,
+    ) -> Result<f64> {
+        Ok(super::mint::bounded_amounts(&self.venue.cfg, snapshot, value, widths)?.0)
+    }
+    async fn mint_bounded_layer(&self, layer: &str, value: f64, widths: (f64, f64)) -> Result<()> {
+        self.mint_plan(layer, value, widths.0, Some(widths)).await?;
+        Ok(())
+    }
     async fn increase_position(&self, position: &LpPosition, value: f64) -> Result<()> {
         self.increase(position, value).await?;
         Ok(())
@@ -579,20 +591,33 @@ impl Executor {
         self.store.write("nfts.json", &ids)
     }
     pub async fn mint(&self, layer: &str, value: f64, width: f64) -> Result<Value> {
+        self.mint_plan(layer, value, width, None).await
+    }
+    async fn mint_plan(
+        &self,
+        layer: &str,
+        value: f64,
+        width: f64,
+        bounded: Option<(f64, f64)>,
+    ) -> Result<Value> {
         ensure!(
             !self.ids()?.iter().any(|(l, _)| l == layer),
             "layer already has an NFT"
         );
         let snap = self.venue.execution_snapshot().await?;
         let (lo, hi) = math::range(snap.price, width);
-        let (tl, tu) = math::aligned_ticks(
-            lo,
-            hi,
-            snap.tick_spacing,
-            self.venue.cfg.base_decimals,
-            self.venue.cfg.quote_decimals,
-            snap.base_is_token0,
-        )?;
+        let (tl, tu) = if let Some(widths) = bounded {
+            super::mint::bounded_ticks(&self.venue.cfg, &snap, widths)?
+        } else {
+            math::aligned_ticks(
+                lo,
+                hi,
+                snap.tick_spacing,
+                self.venue.cfg.base_decimals,
+                self.venue.cfg.quote_decimals,
+                snap.base_is_token0,
+            )?
+        };
         let a = math::tick_to_price(
             tl,
             self.venue.cfg.base_decimals,
@@ -609,7 +634,16 @@ impl Executor {
         let (base, quote) = math::amounts(l, a.min(b), a.max(b), snap.price);
         let rb = raw_units(base, self.venue.cfg.base_decimals)?;
         let rq = raw_units(quote, self.venue.cfg.quote_decimals)?;
-        let (rb, rq) = self.funded_liquidity_amounts(rb, rq).await?;
+        let (rb, rq) = if bounded.is_some() {
+            super::mint::fit_balances(
+                rb,
+                rq,
+                self.venue.balance(self.venue.base, self.owner()).await?,
+                self.venue.balance(self.venue.quote, self.owner()).await?,
+            )?
+        } else {
+            self.funded_liquidity_amounts(rb, rq).await?
+        };
         ensure!(
             self.venue.balance(self.venue.base, self.owner()).await? >= rb
                 && self.venue.balance(self.venue.quote, self.owner()).await? >= rq,
@@ -647,7 +681,7 @@ impl Executor {
         self.send(
             self.venue.manager,
             INfpm::mintCall { params }.abi_encode(),
-            json!({"kind":"mint","layer":layer,"value_usdg":value,"half_width":width,"tick_lower":tl,"tick_upper":tu,"raw_base":rb.to_string(),"raw_quote":rq.to_string(),"price":snap.price,"quote_time_ms":snap.time_ms,"quote_block":snap.block,"amount0_min":min0.to_string(),"amount1_min":min1.to_string(),"slippage_bps":self.venue.cfg.slippage_bps}),
+            json!({"kind":"mint","layer":layer,"value_usdg":value,"half_width":width,"bounded_widths":bounded,"tick_lower":tl,"tick_upper":tu,"raw_base":rb.to_string(),"raw_quote":rq.to_string(),"price":snap.price,"quote_time_ms":snap.time_ms,"quote_block":snap.block,"amount0_min":min0.to_string(),"amount1_min":min1.to_string(),"slippage_bps":self.venue.cfg.slippage_bps}),
         )
         .await
     }

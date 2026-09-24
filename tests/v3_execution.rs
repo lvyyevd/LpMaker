@@ -287,3 +287,36 @@ async fn broadcast_uncertainty_stays_persisted_and_blocks_duplicate_mint() {
     assert_eq!(f.ex.store.pending().unwrap().unwrap(), pending);
     assert_eq!(f.state.lock().unwrap().sent.len(), 3);
 }
+
+#[tokio::test]
+async fn bounded_robinhood_mint_keeps_inward_ticks_and_persists_actual_nft() {
+    use lp_maker::domain::LiquidityExecutor;
+    let f = Fixture::new(false).await;
+    let snap = f.ex.venue.execution_snapshot().await.unwrap();
+    let base =
+        f.ex.bounded_base_requirement(119., (0.07825, 0.08), &snap)
+            .unwrap();
+    assert!(base > 0. && base * snap.price < 119.);
+    f.ex.mint_bounded_layer("band", 119., (0.07825, 0.08))
+        .await
+        .unwrap();
+    assert_eq!(f.ex.ids().unwrap(), vec![("band".into(), "42".into())]);
+    {
+        let state = f.state.lock().unwrap();
+        let tx = state.sent.last().unwrap();
+        let p = INfpm::mintCall::abi_decode(tx.input()).unwrap().params;
+        let lo = math::tick_to_price(p.tickLower.as_i32(), 18, 6, true);
+        let hi = math::tick_to_price(p.tickUpper.as_i32(), 18, 6, true);
+        assert!(lo >= snap.price * (1. - 0.07825));
+        assert!(hi <= snap.price * 1.08);
+        assert!(p.amount0Min > U256::ZERO && p.amount1Min > U256::ZERO);
+        assert_eq!(state.sent.len(), 3); // two approvals followed by one mint
+    }
+    assert!(f.ex.store.pending().unwrap().is_none());
+    // 持久化NFT必须阻止重复mint。
+    assert!(
+        f.ex.mint_bounded_layer("band", 119., (0.07825, 0.08))
+            .await
+            .is_err()
+    );
+}

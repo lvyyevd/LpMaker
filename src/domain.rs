@@ -130,6 +130,23 @@ pub trait LiquidityExecutor: Send + Sync {
         Ok(value / 2.0 / snapshot.price)
     }
     async fn mint_layer(&self, layer: &str, value: f64, width: f64) -> Result<()>;
+    /// 可选执行能力：不支持的平台明确拒绝，不能悄悄回退到其他区间。
+    fn bounded_base_requirement(
+        &self,
+        _value: f64,
+        _widths: (f64, f64),
+        _snapshot: &PoolSnapshot,
+    ) -> Result<f64> {
+        anyhow::bail!("bounded LP range unsupported by this venue")
+    }
+    async fn mint_bounded_layer(
+        &self,
+        _layer: &str,
+        _value: f64,
+        _widths: (f64, f64),
+    ) -> Result<()> {
+        anyhow::bail!("bounded LP range unsupported by this venue")
+    }
     async fn increase_position(&self, position: &LpPosition, value: f64) -> Result<()>;
     async fn remove_position(&self, position: &LpPosition) -> Result<()>;
     async fn swap_inventory(&self, sell_base: bool, amount: f64) -> Result<()>;

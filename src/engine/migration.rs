@@ -12,6 +12,8 @@ use std::{fs, future::Future, io::Write, path::Path, sync::Arc};
 pub const MARKER: &str = "strategy_migration.json";
 const PROFILE: &str = "robinhood-eth-persistent-dd5-200";
 const TEMPLATE: &str = include_str!("../../config/eth-persistent-dd5-paper.toml");
+const BAND_PROFILE: &str = "robinhood-eth-band-200-v1";
+const BAND_TEMPLATE: &str = include_str!("../../config/eth-band-paper.toml");
 
 fn binding(c: &Config) -> Result<Value> {
     super::transport_independent_fingerprint(&serde_json::to_string(&json!({
@@ -21,13 +23,19 @@ fn binding(c: &Config) -> Result<Value> {
 }
 
 struct Plan {
+    band: bool,
     exit: Config,
     target: Config,
     marker: Value,
 }
 
+#[cfg(test)]
 fn plan(path: &Path, current: &Config, store: &Store) -> Result<Plan> {
-    let template: Config = toml::from_str(TEMPLATE)?;
+    plan_for(path, current, store, false)
+}
+fn plan_for(path: &Path, current: &Config, store: &Store, band: bool) -> Result<Plan> {
+    let profile = if band { BAND_PROFILE } else { PROFILE };
+    let template: Config = toml::from_str(if band { BAND_TEMPLATE } else { TEMPLATE })?;
     ensure!(
         current.mode == Mode::Live
             && current.liquidity.chain_id == template.liquidity.chain_id
@@ -51,7 +59,7 @@ fn plan(path: &Path, current: &Config, store: &Store) -> Result<Plan> {
     if let Some(m) = &previous {
         ensure!(
             m["schema"] == 1
-                && m["profile"] == PROFILE
+                && m["profile"] == profile
                 && m["config_path"] == json!(config_path)
                 && m["target_binding"] == binding(&target)?,
             "存在另一项未完成迁移；保留记录并使用原配置继续"
@@ -95,9 +103,10 @@ fn plan(path: &Path, current: &Config, store: &Store) -> Result<Plan> {
         }
     }
     exit.validate()?;
-    let marker = json!({"schema":1,"profile":PROFILE,"config_path":config_path,
+    let marker = json!({"schema":1,"profile":profile,"config_path":config_path,
         "exit_binding":binding(&exit)?,"target_binding":binding(&target)?});
     Ok(Plan {
+        band,
         exit,
         target,
         marker,
@@ -105,6 +114,11 @@ fn plan(path: &Path, current: &Config, store: &Store) -> Result<Plan> {
 }
 
 fn summary(c: &Config) -> Value {
+    if let Some(band) = crate::strategy::eth::band::config(&c.strategy) {
+        return json!({"profile":BAND_PROFILE,"state_dir":c.state_dir,"total_capital_usd":200,"lp_budget_usd":120,"hedge_collateral_usd":60,"reserve_usd":20,
+            "band":band,"hyperliquid_leverage":3,"cross_margin":true,"hard_drawdown_halt":0.05,
+            "research_warning":"baseline 5.59%; failed cost stress; live outcomes are not guaranteed"});
+    }
     json!({"profile":PROFILE,"state_dir":c.state_dir,"total_capital_usd":200,
         "lp_budget_usd":120,"hedge_collateral_usd":60,"reserve_usd":20,
         "lp_range":"P/10 .. 10P","inventory_short_ratio":0.5,
@@ -118,7 +132,24 @@ pub async fn request(
     store: Arc<Store>,
     execute: bool,
 ) -> Result<Value> {
-    let p = plan(path, &current, &store)?;
+    request_for(path, current, store, execute, false).await
+}
+pub async fn request_band(
+    path: &Path,
+    current: Config,
+    store: Arc<Store>,
+    execute: bool,
+) -> Result<Value> {
+    request_for(path, current, store, execute, true).await
+}
+async fn request_for(
+    path: &Path,
+    current: Config,
+    store: Arc<Store>,
+    execute: bool,
+    band: bool,
+) -> Result<Value> {
+    let p = plan_for(path, &current, &store, band)?;
     if !execute {
         return Ok(json!({"status":"preview_only","target":summary(&p.target),
             "steps":["reconcile old state","cancel ETH orders","remove this pool LP and collect fees",
@@ -159,14 +190,14 @@ where
     ensure!(store.is_writable(), "切换策略需要独占状态锁");
     let original = read_regular(path)?;
     let disk: Config = toml::from_str(std::str::from_utf8(&original)?)?;
-    let latest = plan(path, &disk, &store)?;
+    let latest = plan_for(path, &disk, &store, p.band)?;
     ensure!(
         latest.marker == p.marker
             && serde_json::to_value(&latest.target)? == serde_json::to_value(&p.target)?,
         "读取配置后文件发生变化；未执行平仓，请重新运行命令"
     );
     let content = format!(
-        "# Robinhood ETH 长持 LP 实盘；由 switch-robinhood-dd5 在确认空仓后安装。\n{}",
+        "# Robinhood ETH 策略；由显式迁移命令在确认空仓后安装。\n{}",
         toml::to_string_pretty(&p.target)?
     );
     let path = path.canonicalize()?;
@@ -251,6 +282,64 @@ mod tests {
                 fs::remove_file(e.path()).unwrap();
             }
         }
+    }
+
+    #[tokio::test]
+    async fn bounded_switch_exits_old_profile_and_installs_only_reviewed_budget() {
+        let (_d, path, c, store) = setup();
+        let p = plan_for(&path, &c, &store, true).unwrap();
+        assert_eq!(p.marker["profile"], BAND_PROFILE);
+        assert!(p.exit.strategy.eth_persistent.is_none());
+        assert!(crate::strategy::eth::band::config(&p.target.strategy).is_some());
+        let original = fs::read(&path).unwrap();
+        let seen = path.clone();
+        execute_plan(&path, p, store.clone(), |old, s| async move {
+            assert_eq!(fs::read(&seen)?, original);
+            assert!(crate::strategy::eth::band::config(&old.strategy).is_none());
+            fake_clear(&old, &s);
+            Ok(json!({"status":"flat_and_reset"}))
+        })
+        .await
+        .unwrap();
+        let installed = Config::load(&path).unwrap();
+        assert_eq!(installed.strategy.hedge_deadband_usd, 15.);
+        assert_eq!(installed.strategy.cooldown_hours, 3);
+        assert_eq!(installed.strategy.resume_healthy_hours, 4);
+        assert_eq!(
+            installed
+                .strategy
+                .eth_persistent
+                .as_ref()
+                .unwrap()
+                .hedge_interval_hours,
+            2
+        );
+        assert_eq!(
+            crate::strategy::eth::band::config(&installed.strategy)
+                .unwrap()
+                .upper_width,
+            0.08
+        );
+        assert_eq!(fs::read_dir(&c.state_dir).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn bounded_failed_exit_retains_records_and_does_not_allow_other_migration() {
+        let (_d, path, c, store) = setup();
+        let original = fs::read(&path).unwrap();
+        let p = plan_for(&path, &c, &store, true).unwrap();
+        assert!(
+            execute_plan(&path, p, store.clone(), |_, s| async move {
+                s.write("pending.json", &json!({"hash":"uncertain"}))?;
+                anyhow::bail!("partial exchange fill")
+            })
+            .await
+            .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert!(store.pending().unwrap().is_some());
+        assert!(plan_for(&path, &c, &store, true).is_ok());
+        assert!(plan_for(&path, &c, &store, false).is_err());
     }
 
     #[test]

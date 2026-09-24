@@ -11,3 +11,7 @@
 
 # Solana historical data and generated backtest artifacts stay local.
 /backtests/solana/
+
+# ETH research data/results are offline-only, same policy as Solana.
+/backtests/eth/
+/backtests/.DS_Store

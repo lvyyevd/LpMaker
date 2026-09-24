@@ -20,7 +20,7 @@ class SwitchScriptTest(unittest.TestCase):
         self.foreground = []
         for name in ("scripts/lib", "config", "target/release", "bin", "data/state"):
             (self.root / name).mkdir(parents=True)
-        for name in ("switch-robinhood-dd5.sh", "start-background.sh", "lib/background.sh"):
+        for name in ("switch-robinhood-dd5.sh", "switch-robinhood-band.sh", "start-background.sh", "lib/background.sh"):
             shutil.copy(ROOT / "scripts" / name, self.root / "scripts" / name)
         (self.root / "config/local.toml").write_text("# fake configuration\n")
         (self.root / "run.log").write_text("old log retained\n")
@@ -68,7 +68,7 @@ signal.signal(signal.SIGINT, on_signal)
 signal.signal(signal.SIGHUP, on_signal)
 if "check" in args:
     print("data/state")
-elif "switch-robinhood-dd5" in args:
+elif "switch-robinhood-dd5" in args or "switch-robinhood-band" in args:
     if "--execute" in args:
         Path("exit-ready").write_text(json.dumps({"pid":os.getpid(),"sid":os.getsid(0)}))
         if os.environ["SCENARIO"] == "exit_failure":
@@ -183,6 +183,19 @@ else:
         runner = json.loads((self.root / "runner.json").read_text())
         self.assertEqual(runner["pid"], runner["sid"])
         self.assertNotEqual(runner["sid"], exit_process["sid"])
+        self.assert_survives_terminal_signals(foreground.pid, runner["pid"])
+
+    def test_band_wrapper_survives_terminal_signals_and_selects_new_profile(self):
+        foreground = self.foreground_shell("scripts/switch-robinhood-band.sh", "slow_exit")
+        self.wait_for(lambda: (self.root / "exit-ready").exists() and (self.root / "launcher-returned").exists())
+        child = json.loads((self.root / "exit-ready").read_text())
+        self.assert_survives_terminal_signals(foreground.pid, child["pid"])
+        calls = self.calls()
+        self.assertEqual(sum("switch-robinhood-band" in c for c in calls), 2)
+        self.assertFalse(any("switch-robinhood-dd5" in c for c in calls))
+        (self.root / "allow-exit").touch()
+        self.wait_for(lambda: (self.root / "runner.json").exists())
+        runner = json.loads((self.root / "runner.json").read_text())
         self.assert_survives_terminal_signals(foreground.pid, runner["pid"])
 
     def test_start_only_keeps_checkpoint_and_survives_terminal_signals(self):

@@ -1,8 +1,8 @@
-# Robinhood ETH 长持 LP 实盘配置：首次切换必须使用 scripts/switch-robinhood-dd5.sh。
-# 私钥仅填写到项目根目录 .env，并在启动前 source .env；不要写入本文件。
-# 以下策略参数是研究初值，不代表预期收益。
-mode = "live"
-state_dir = "data/live-200"
+# 200 USD paper-only example: 120 LP + 60 hedge collateral + 20 reserve.
+# This preset is for simulation; small residual live hedges remain subject to exchange minimums.
+# Optimized on one historical sample; these thresholds are not profit guarantees.
+mode = "paper"
+state_dir = "data/eth-band-paper"
 poll_seconds = 15
 
 [hyperliquid]
@@ -12,11 +12,9 @@ mainnet = true
 coins = ["ETH", "BTC", "SOL"]
 hedge_coin = "ETH"
 private_key_env = "LPMAKER_HL_PRIVATE_KEY"
-# 查询账户或使用实盘前，取消下一行注释并填入持有保证金的主账户地址。
-# 这里不是 API 钱包地址；模拟策略和公共行情无需填写。
-account = "0x1F0Bfe9eF7bC440DCb2df3777D952015f874A832"
-# 普通主账户不填 vault；仅在使用子账户时填写实际子账户地址。
-# vault = "0xYOUR_SUBACCOUNT_ADDRESS"
+# Account owner (NOT API/agent wallet). Required for authenticated live trading.
+# account = "0x..."
+# vault = "0x..."
 leverage = 3
 cross_margin = true
 maker_wait_seconds = 15
@@ -25,10 +23,10 @@ emergency_slippage_bps = 30
 [liquidity]
 kind = "uniswap_v3"
 chain_id = 4663
-rpc_url = "https://robinhood-rpc.publicnode.com/52f60211bf320bbb41c2bef258f98d63233032bf3109d0ee8291c685524aec54"
+rpc_url = "https://robinhood-rpc.publicnode.com"
 # History only: PublicNode free eth_getLogs may require a personal token.
-archive_rpc_url = "https://robinhood-rpc.publicnode.com/52f60211bf320bbb41c2bef258f98d63233032bf3109d0ee8291c685524aec54"
-ws_url = "wss://robinhood-rpc.publicnode.com/52f60211bf320bbb41c2bef258f98d63233032bf3109d0ee8291c685524aec54"
+archive_rpc_url = "https://rpc.mainnet.chain.robinhood.com"
+ws_url = "wss://robinhood-rpc.publicnode.com"
 # Optional public LP address for read-only monitoring; no private key needed.
 # owner = "0x..."
 nonce_refresh_seconds = 30
@@ -47,8 +45,9 @@ confirmations = 12
 slippage_bps = 30
 deadline_seconds = 120
 max_gas_native = 0.003
-gas_fee_buffer_bps = 10000 # Extra 100% fee-cap headroom
-gas_limit_buffer_bps = 2000 # Extra 20% gas units
+gas_fee_buffer_bps = 10000 # Fee cap: add 100% headroom; EIP-1559 does not pay the entire cap.
+gas_limit_buffer_bps = 2000 # Gas units: add 20%, rounded up.
+max_quote_age_seconds = 60
 
 [strategy]
 total_capital = 200.0
@@ -117,11 +116,23 @@ hyperliquid_interval_seconds = 60
 robinhood_interval_seconds = 60
 hyperliquid_refresh_seconds = 30
 robinhood_refresh_seconds = 15
-volume_window_seconds = 300
-backfill_blocks = 6000
 refresh_timeout_seconds = 45
 
 [logging]
 level = "info"
 directory = "data/logs"
 retained_files = 14
+
+
+[runtime]
+# Failed reads restart reconciliation; uncertain writes are never replayed.
+read_retry_seconds = 5
+observation_timeout_seconds = 45
+
+[storage]
+event_segment_bytes = 16777216
+event_retained_segments = 32
+terminal_orders_keep = 1000
+# Immutable terminal-order history: stop at this cap; never silently erase IDs.
+order_archive_max_bytes = 268435456
+min_free_bytes = 268435456
